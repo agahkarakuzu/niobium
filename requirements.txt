@@ -1,0 +1,5 @@
+easyocr
+pillow
+numpy
+PyMuPDF
+tqdm

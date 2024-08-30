@@ -1,0 +1,17 @@
+{
+    "exclude":{
+        "exact":[
+            "Reproductive system",
+            "Urinary system",
+            "Gastrointestinal system",
+            "A",
+            "B"
+         ],
+        "regex":[
+            "(Figure|Fig\\.|Fig\\:)\\s+(\\d+[-\\w]*).*"
+        ]
+    },
+    "extra":[
+        {"Ductus deferens": "Ductus deferens is a.k.a <span style=\"color:red;\">Vas deferens</span>"}
+    ]
+}
