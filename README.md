@@ -135,4 +135,4 @@ python niobium.py --directory /abs/path/to/images --deck-name MyStudyDeck --gpu 
 
 ## Contributing
 
-If you'd like to contribute, open an issue or submit a pull request. Add tests where practical.
+If you'd like to contribute, open an issue or submit a pull request.
