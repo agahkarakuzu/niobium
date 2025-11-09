@@ -4,23 +4,41 @@ NIOBIUM is a small CLI tool for extracting text and image-occlusion-style notes 
 
 ### Trivia: What the actual heck is niobium?
 
-Niobium is a stealthy gray metal that is absurdly strong, feather‑light and allergic to corrosion. Mostly mined in Brazil and Canada, it moonlights in super‑alloys for jet engines and superconducting MRI magnets. It even hides in the capacitors inside your phone and laptop. 
+Niobium is a stealthy gray metal that is absurdly strong, feather‑light and allergic to corrosion. Mostly mined in Brazil and Canada, it moonlights in super‑alloys for jet engines and superconducting MRI magnets. It even hides in the capacitors inside your phone and laptop.
 
 So next time you're on a flight, fiddling with your phone on the way to an MRI conference, tip your hat to niobium, OR just give this repo a ⭐️.
 
 
-## Requirements
+## Installation
 
-- Python 3.8+
-- Install runtime requirements from the repository:
+### Using pip
 
 ```bash
-pip install -r requirements.txt
+pip install niobium
 ```
+
+### Using uv (faster alternative)
+
+```bash
+uv pip install niobium
+```
+
+### From source
+
+```bash
+git clone https://github.com/agahkarakuzu/niobium.git
+cd niobium
+pip install -e .
+```
+
+## Requirements
+
+- Python 3.8 or higher
+- All dependencies are automatically installed with the package
 
 ## Quick overview
 
-The main entry point is the `niobium.py` script. It exposes a few mutually-exclusive input modes and a few mutually-exclusive output modes.
+The main entry point is the `niobium` command. It exposes a few mutually-exclusive input modes and a few mutually-exclusive output modes.
 
 Inputs (one required):
 - `-i, --image` — absolute path to a single image file
@@ -42,7 +60,7 @@ Other useful flags:
 - `-hdr, --add-header` — add filename as a header (default: False)
 - `-basic, --basic-type` — create basic Anki cards instead of image-occlusion notes (default: False)
 
-Run `python niobium.py -h` to see the help text with the current arguments.
+Run `niobium -h` to see the help text with the current arguments.
 
 ## Examples
 
@@ -53,7 +71,7 @@ Below are some concrete example commands (assumes you're in the project root and
 This processes all images under a directory and pushes notes to the Anki deck named `MyStudyDeck`.
 
 ```bash
-python niobium.py --directory /absolute/path/to/images --deck-name MyStudyDeck
+niobium --directory /absolute/path/to/images --deck-name MyStudyDeck
 ```
 
 Notes:
@@ -66,7 +84,7 @@ Notes:
 This extracts embedded images from `lecture.pdf` into `./out_images`.
 
 ```bash
-python niobium.py --single-pdf /absolute/path/to/lecture.pdf --pdf-img-out /absolute/path/to/out_images
+niobium --single-pdf /absolute/path/to/lecture.pdf --pdf-img-out /absolute/path/to/out_images
 ```
 
 Important: `--single-pdf` is required when using `--pdf-img-out`.
@@ -77,19 +95,19 @@ Important: `--single-pdf` is required when using `--pdf-img-out`.
 This processes a directory and writes an `.apkg` bundle suitable for import into Anki without requiring AnkiConnect at runtime.
 
 ```bash
-python niobium.py --directory /absolute/path/to/images --apkg-out /absolute/path/to/output_dir
+niobium --directory /absolute/path/to/images --apkg-out /absolute/path/to/output_dir
 ```
 
 Optional: include the Image Occlusion model id if you want the built-in model referenced in the package:
 
 ```bash
-python niobium.py --directory /absolute/path/to/images --apkg-out /absolute/path/to/output_dir --io-model-id 12345
+niobium --directory /absolute/path/to/images --apkg-out /absolute/path/to/output_dir --io-model-id 12345
 ```
 
 4) Create basic (front/back) Anki cards instead of image-occlusion notes
 
 ```bash
-python niobium.py --directory /absolute/path/to/images --deck-name MyStudyDeck --basic-type True
+niobium --directory /absolute/path/to/images --deck-name MyStudyDeck --basic-type True
 ```
 
 This comes in handy when you have a bunch of images in a folder (may be extracted from a PDF, see (2) above), and would like to create Q&A for each one of them. 
@@ -99,7 +117,7 @@ This comes in handy when you have a bunch of images in a folder (may be extracte
 If bounding boxes are too fragmented, increase the merge thresholds. To OCR multiple languages, provide a comma-separated list.
 
 ```bash
-python niobium.py --directory /absolute/path/to/images --deck-name MyStudyDeck --merge-lim-x 20 --merge-lim-y 20 --langs en,fr
+niobium --directory /absolute/path/to/images --deck-name MyStudyDeck --merge-lim-x 20 --merge-lim-y 20 --langs en,fr
 ```
 
 Note: Rectangle merging and other heuristics are experimental. Nearby occlusion boxes may be merged unintentionally, or distinct boxes may remain separate. Adjust --merge-lim-x/--merge-lim-y or disable merging with --merge-rects to change the behavior.
@@ -111,7 +129,7 @@ If you come up with a more robust approach to this, feel free to send a PR!
 Pass `--gpu 0` to attempt to use GPU 0. The default `-1` runs on CPU.
 
 ```bash
-python niobium.py --directory /abs/path/to/images --deck-name MyStudyDeck --gpu 0
+niobium --directory /abs/path/to/images --deck-name MyStudyDeck --gpu 0
 ```
 
 ## Common workflows
@@ -130,8 +148,31 @@ python niobium.py --directory /abs/path/to/images --deck-name MyStudyDeck --gpu 
 
 ## Development
 
-- Run `python niobium.py -h` to inspect arguments.
-- The code lives in the `niobium/` package; `niobium/io.py` contains I/O helpers.
+### Setting up for development
+
+```bash
+git clone https://github.com/agahkarakuzu/niobium.git
+cd niobium
+pip install -e .
+```
+
+### Running tests
+
+The package includes automated tests that run on each push via GitHub Actions. You can test locally:
+
+```bash
+# Test the CLI is available
+niobium -h
+
+# Test import
+python -c "from niobium.cli import main; print('Import successful')"
+```
+
+### Project structure
+
+- `niobium/cli.py` - Main CLI entry point with argument parsing
+- `niobium/io.py` - Core I/O helpers and OCR functionality
+- `pyproject.toml` - Package configuration and dependencies
 
 ## Contributing
 
