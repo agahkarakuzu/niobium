@@ -1,5 +1,5 @@
 import argparse
-from niobium.io import niobium
+from anki_niobium.io import niobium
 
 def main():
     ap = argparse.ArgumentParser()
