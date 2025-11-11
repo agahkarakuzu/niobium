@@ -48,4 +48,4 @@ niobium = "niobium.cli:main"
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["anki-niobium"]
+packages = ["niobium"]
