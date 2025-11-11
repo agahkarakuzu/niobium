@@ -44,9 +44,8 @@ Issues = "https://github.com/agahkarakuzu/niobium/issues"
 [project.scripts]
 niobium = "niobium.cli:main"
 
+[tool.hatch.version]
+source = "vcs"
+
 [tool.hatch.build.targets.wheel]
 packages = ["anki-niobium"]
-
-[tool.setuptools_scm]
-version_scheme = "post-release"
-local_scheme = "dirty-tag"
