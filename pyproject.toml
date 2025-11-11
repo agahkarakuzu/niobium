@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "anki-niobium"
-version = "0.1.0"
+dynamic = ["version"]
 description = "NIOBIUM: Nadia's Image Occlusion Booster Is UnManned - A CLI tool for extracting text and image-occlusion-style notes from images and PDFs for Anki"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -45,4 +45,8 @@ Issues = "https://github.com/agahkarakuzu/niobium/issues"
 niobium = "niobium.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["niobium"]
+packages = ["anki-niobium"]
+
+[tool.setuptools_scm]
+version_scheme = "post-release"
+local_scheme = "dirty-tag"
