@@ -29,7 +29,7 @@ classifiers = [
 dependencies = [
     "easyocr",
     "pillow",
-    "numpy",
+    "numpy<2.0",
     "PyMuPDF",
     "tqdm",
     "requests",
