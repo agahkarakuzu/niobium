@@ -42,10 +42,10 @@ Repository = "https://github.com/agahkarakuzu/niobium"
 Issues = "https://github.com/agahkarakuzu/niobium/issues"
 
 [project.scripts]
-niobium = "niobium.cli:main"
+niobium = "anki_niobium.cli:main"
 
 [tool.hatch.version]
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["niobium"]
+packages = ["anki_niobium"]
