@@ -1,3 +1,5 @@
+![PyPI - Version](https://img.shields.io/pypi/v/anki-niobium?style=flat&logo=python&logoColor=white&logoSize=8&labelColor=rgb(255%2C0%2C0)&color=white)
+
 ## NIOBIUM: Nadia's Image Occlusion Booster Is UnManned
 
 NIOBIUM is a small CLI tool for extracting text and image-occlusion-style notes from images and PDFs, and for preparing Anki-compatible outputs (via AnkiConnect or by creating an .apkg). This README shows common usages and examples for the command-line interface.
@@ -14,13 +16,13 @@ So next time you're on a flight, fiddling with your phone on the way to an MRI c
 ### Using pip
 
 ```bash
-pip install niobium
+pip install anki-niobium
 ```
 
 ### Using uv (faster alternative)
 
 ```bash
-uv pip install niobium
+uv pip install anki-niobium
 ```
 
 ### From source
