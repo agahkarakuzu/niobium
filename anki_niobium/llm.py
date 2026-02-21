@@ -2,7 +2,11 @@ import os
 import json
 import base64
 import anthropic
-from rich.console import Console
+from rich.console import Console, Group
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from anki_niobium.cache import content_hash_bytes, get_cached_claude_response, set_cached_claude_response
 
 console = Console()
 
@@ -103,7 +107,7 @@ def smart_filter_results(results, image_bytes, config):
     if not results:
         return ([], "")
 
-    model = llm_config.get("model", "claude-sonnet-4-6-20250514")
+    model = llm_config.get("model", "claude-sonnet-4-6")
     max_tokens = llm_config.get("max_tokens", 1024)
     temperature = llm_config.get("temperature", 0.2)
 
@@ -118,93 +122,130 @@ def smart_filter_results(results, image_bytes, config):
     for i, (bbox, text, prob) in enumerate(results):
         text_list.append({"index": i, "text": text, "confidence": round(prob, 2)})
 
-    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    text_list_json = json.dumps(text_list, indent=2)
+    image_bytes_hash = content_hash_bytes(image_bytes)
+    no_cache = config.get("_no_cache", False)
 
-    user_content = [
-        {
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/png",
-                "data": image_b64,
+    # Check Claude response cache
+    cached = None
+    if not no_cache:
+        cached = get_cached_claude_response(image_bytes_hash, text_list_json, model, instructions)
+
+    if cached is not None:
+        data = cached
+        from_cache = True
+    else:
+        # Live API call
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        user_content = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": image_b64,
+                },
             },
-        },
-        {
-            "type": "text",
-            "text": f"Here are the OCR-detected text regions:\n\n{json.dumps(text_list, indent=2)}\n\nAnalyze this image and classify each region.",
-        },
-    ]
+            {
+                "type": "text",
+                "text": f"Here are the OCR-detected text regions:\n\n{text_list_json}\n\nAnalyze this image and classify each region.",
+            },
+        ]
 
-    try:
-        client = _get_client(api_key)
-        console.print(f"[cyan]Sending image to Claude ({model}) for smart filtering...[/cyan]")
-        response = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_content}],
-        )
+        try:
+            client = _get_client(api_key)
+            console.print(f"[cyan]Sending image to Claude ({model}) for smart filtering...[/cyan]")
+            response = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_content}],
+            )
 
-        response_text = response.content[0].text
+            response_text = response.content[0].text
 
-        # Strip markdown code fences if present
-        if "```" in response_text:
-            parts = response_text.split("```")
-            for part in parts[1:]:
-                cleaned = part.strip()
-                if cleaned.startswith("json"):
-                    cleaned = cleaned[4:]
-                cleaned = cleaned.strip()
-                if cleaned.startswith("{"):
-                    response_text = cleaned
-                    break
+            # Strip markdown code fences if present
+            if "```" in response_text:
+                parts = response_text.split("```")
+                for part in parts[1:]:
+                    cleaned = part.strip()
+                    if cleaned.startswith("json"):
+                        cleaned = cleaned[4:]
+                    cleaned = cleaned.strip()
+                    if cleaned.startswith("{"):
+                        response_text = cleaned
+                        break
 
-        data = json.loads(response_text.strip())
-        decisions = {d["index"]: d for d in data["decisions"]}
+            data = json.loads(response_text.strip())
+            set_cached_claude_response(image_bytes_hash, text_list_json, model, instructions, data)
+            from_cache = False
 
-        # Use image context as a header in Back Extra
-        context = data.get("context", "")
-        extra = ""
-        if context:
-            extra = f'<div style="text-align:left;color:#555;font-style:italic;margin-bottom:8px;">{context}</div>'
-            console.print(f"[cyan]  Context: {context}[/cyan]")
+        except Exception as e:
+            console.print(f"[bold red]Claude API error: {e}[/bold red]")
+            console.print("[yellow]Falling back to rule-based filtering.[/yellow]")
+            from anki_niobium.io import niobium
+            return niobium.filter_results(results, config)
 
-        filtered_results = []
-        hints_html = ""
-        corrections = 0
-        for i, (bbox, text, prob) in enumerate(results):
-            decision = decisions.get(i)
-            if decision is None or decision.get("action") == "occlude":
-                # Apply OCR correction if Claude detected a misread
-                corrected = decision.get("corrected_text") if decision else None
-                if corrected and corrected != text:
-                    console.print(f"[cyan]  OCR fix: '{text}' → '{corrected}'[/cyan]")
-                    text = corrected
-                    corrections += 1
+    # Process response (same path for cached and live)
+    decisions = {d["index"]: d for d in data["decisions"]}
 
-                filtered_results.append((bbox, text, prob))
-                hint = decision.get("hint", "") if decision else ""
-                if hint:
-                    hints_html += f"<b>{text}</b>: {hint}<br>"
-                    console.print(f"[cyan]  Hint for '{text}': {hint}[/cyan]")
-            else:
-                reason = decision.get("reason", "")
-                console.print(f"[dim]  Skipping '{text}'{f' ({reason})' if reason else ''}[/dim]")
+    context = data.get("context", "")
+    extra = ""
+    if context:
+        extra = f'<div style="text-align:left;color:#555;font-style:italic;margin-bottom:8px;">{context}</div>'
 
-        if hints_html:
-            extra += hints_html
+    table = Table(show_header=True, header_style="bold", pad_edge=False, box=None)
+    table.add_column("", width=2)
+    table.add_column("Text", style="white", no_wrap=True, max_width=30)
+    table.add_column("Detail", style="dim")
 
-        kept = len(filtered_results)
-        skipped = len(results) - kept
-        summary = f"Smart filter: {kept} kept, {skipped} skipped"
-        if corrections:
-            summary += f", {corrections} OCR corrections"
-        console.print(f"[green]{summary}[/green]")
-        return (filtered_results, extra)
+    filtered_results = []
+    hints_html = ""
+    corrections = 0
+    for i, (bbox, text, prob) in enumerate(results):
+        decision = decisions.get(i)
+        if decision is None or decision.get("action") == "occlude":
+            corrected = decision.get("corrected_text") if decision else None
+            display_text = text
+            if corrected and corrected != text:
+                display_text = f"{corrected} [dim](was: {text})[/dim]"
+                text = corrected
+                corrections += 1
 
-    except Exception as e:
-        console.print(f"[bold red]Claude API error: {e}[/bold red]")
-        console.print("[yellow]Falling back to rule-based filtering.[/yellow]")
-        from anki_niobium.io import niobium
-        return niobium.filter_results(results, config)
+            filtered_results.append((bbox, text, prob))
+            hint = decision.get("hint", "") if decision else ""
+            if hint:
+                hints_html += f"<b>{text}</b>: {hint}<br>"
+            table.add_row("[green]+[/green]", display_text, hint if hint else "[dim]-[/dim]")
+        else:
+            reason = decision.get("reason", "")
+            table.add_row("[red]-[/red]", f"[dim]{text}[/dim]", f"[dim]{reason}[/dim]")
+
+    if hints_html:
+        extra += hints_html
+
+    kept = len(filtered_results)
+    skipped = len(results) - kept
+    subtitle_parts = [f"[green]{kept} kept[/green]", f"[red]{skipped} skipped[/red]"]
+    if corrections:
+        subtitle_parts.append(f"[cyan]{corrections} OCR fixes[/cyan]")
+    if from_cache:
+        subtitle_parts.append("[dim]cached[/dim]")
+    subtitle = " | ".join(subtitle_parts)
+
+    renderables = []
+    if context:
+        renderables.append(Text.from_markup(f"[italic]{context}[/italic]\n"))
+    renderables.append(table)
+
+    panel = Panel(
+        Group(*renderables),
+        title=f"[bold]Smart Filter[/bold] [dim]({model})[/dim]",
+        subtitle=subtitle,
+        border_style="cyan",
+        padding=(1, 1),
+    )
+    console.print(panel)
+
+    return (filtered_results, extra)

@@ -1,0 +1,43 @@
+version: 1
+project:
+  title: Niobium ANKI 
+  subtitle: Putting AI in Anki. For free.
+  description: >-
+    A CLI tool for creating Anki image occlusion flashcards from images and
+    PDFs using OCR and (optional) Claude Vision smart filtering.
+  authors:
+    - name: Agah Karakuzu
+      github: agahkarakuzu
+      url: https://agah.dev
+  github: https://github.com/agahkarakuzu/niobium
+  license: GPL-3.0
+  keywords:
+    - anki
+    - ocr
+    - image-occlusion
+    - flashcards
+    - education
+    - claude
+    - llm
+  toc:
+    - file: docs/index.md
+    - title: Getting Started
+      children:
+        - file: docs/installation.md
+        - file: docs/quickstart.md
+    - title: Usage
+      children:
+        - file: docs/cli-reference.md
+        - file: docs/configuration.md
+        - file: docs/workflows.md
+    - title: Features
+      children:
+        - file: docs/smart-filtering.md
+        - file: docs/pdf-processing.md
+        - file: docs/apkg-export.md
+        - file: docs/caching.md
+    - file: docs/troubleshooting.md
+    - file: docs/contributing.md
+
+site:
+  template: book-theme

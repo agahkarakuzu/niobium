@@ -1,4 +1,4 @@
-![PyPI - Version](https://img.shields.io/pypi/v/anki-niobium?style=flat&logo=python&logoColor=white&logoSize=8&labelColor=rgb(255%2C0%2C0)&color=white)
+![PyPI - Version](https://img.shields.io/pypi/v/nb41?style=flat&logo=python&logoColor=white&logoSize=8&labelColor=rgb(255%2C0%2C0)&color=white)
 
 ## NIOBIUM: Nadia's Image Occlusion Booster Is UnManned
 
@@ -16,13 +16,13 @@ So next time you're on a flight, fiddling with your phone on the way to an MRI c
 ### Using pip
 
 ```bash
-pip install anki-niobium
+pip install nb41
 ```
 
 ### Using uv (faster alternative)
 
 ```bash
-uv pip install anki-niobium
+uv pip install nb41
 ```
 
 ### From source
@@ -114,7 +114,7 @@ Niobium will tell you which config file it is using every time it runs.
     ],
     "llm": {
         "api_key": null,
-        "model": "claude-sonnet-4-6-20250514",
+        "model": "claude-sonnet-4-6",
         "max_tokens": 1024,
         "temperature": 0.2,
         "instructions": null
@@ -133,7 +133,7 @@ Niobium will tell you which config file it is using every time it runs.
 | `exclude.regex` | OCR text matching any of these regular expressions is discarded. Useful for filtering out figure captions (e.g., "Figure 1", "Fig. 2a"). |
 | `extra` | A list of key-value objects. When OCR detects text matching a key (case-insensitive), the corresponding value is appended to the note's "Back Extra" field as HTML. Useful for adding supplementary information to specific terms. |
 | `llm.api_key` | Anthropic API key for Smart mode. If `null`, falls back to `ANTHROPIC_API_KEY` env var. See [Niobium Smart](#niobium-smart). |
-| `llm.model` | Claude model to use (default: `claude-sonnet-4-6-20250514`). |
+| `llm.model` | Claude model to use (default: `claude-sonnet-4-6`). |
 | `llm.max_tokens` | Maximum response length from Claude (default: `1024`). |
 | `llm.temperature` | Response variability — lower is more consistent (default: `0.2`). |
 | `llm.instructions` | Custom instructions appended to the built-in prompt to steer Smart mode for specific disciplines. |
@@ -276,7 +276,7 @@ The `llm` section in your config file controls Smart mode behavior:
 {
     "llm": {
         "api_key": null,
-        "model": "claude-sonnet-4-6-20250514",
+        "model": "claude-sonnet-4-6",
         "max_tokens": 1024,
         "temperature": 0.2,
         "instructions": null
@@ -287,7 +287,7 @@ The `llm` section in your config file controls Smart mode behavior:
 | Key | What it does |
 |-----|-------------|
 | `api_key` | Anthropic API key. If `null`, falls back to `ANTHROPIC_API_KEY` environment variable. |
-| `model` | Claude model to use (default: `claude-sonnet-4-6-20250514`). |
+| `model` | Claude model to use (default: `claude-sonnet-4-6`). |
 | `max_tokens` | Maximum response length from Claude (default: `1024`). |
 | `temperature` | Controls response variability. Lower = more consistent, higher = more creative hints (default: `0.2`). |
 | `instructions` | Custom instructions appended to the built-in prompt. This is where you tailor Smart mode to your study goals (see below). |

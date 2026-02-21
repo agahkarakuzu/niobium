@@ -1,6 +1,7 @@
 {
     "langs": "en",
     "gpu": -1,
+    "qc": false,
     "merge":{
         "enabled": true,
         "limit_x": 10,
@@ -23,7 +24,7 @@
     ],
     "llm":{
         "api_key": null,
-        "model": "claude-sonnet-4-6-20250514",
+        "model": "claude-sonnet-4-6",
         "max_tokens": 1024,
         "temperature": 0.2,
         "instructions": null

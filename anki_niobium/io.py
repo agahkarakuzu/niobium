@@ -18,6 +18,8 @@ from datetime import datetime
 import random
 import genanki
 
+from anki_niobium.cache import content_hash_file, content_hash_bytes, is_processed, mark_processed
+
 ANKI_LOCAL = "http://localhost:8765"
 console = Console()
 
@@ -35,6 +37,8 @@ class niobium:
         self.langs = self.args.get("langs") if self.args.get("langs") is not None else self.config.get("langs", "en")
         self.gpu = self.args.get("gpu") if self.args.get("gpu") is not None else self.config.get("gpu", -1)
         self.smart = self.args.get("smart", False)
+        self.qc = self.config.get("qc", False)
+        self.no_cache = self.args.get("no_cache", False)
 
     @staticmethod
     def load_config(config_path):
@@ -78,8 +82,7 @@ class niobium:
     def edit_config():
         import subprocess
         dest = niobium.init_config()
-        editor = os.environ.get("EDITOR", "vi")
-        subprocess.call([editor, str(dest)])
+        subprocess.call(["open", str(dest.parent)])
 
     def ocr4io(self):
         """
@@ -102,13 +105,19 @@ class niobium:
                 results = self.merge_boxes(results, (self.merge_lim_x, self.merge_lim_y))
             if self.smart:
                 from anki_niobium.llm import smart_filter_results
-                results, extra = smart_filter_results(results, image_bytes, self.config)
+                results, extra = smart_filter_results(results, image_bytes, {**self.config, "_no_cache": self.no_cache})
             else:
                 results, extra = self.filter_results(results, self.config)
             occlusion = self.get_occlusion_coords(results, H, W)
             status = self.add_image_occlusion_deck(self.args["image"], occlusion, self.args["deck_name"], extra, None,self.args["add_header"])
             console.print(status[1])
-            self.save_qc_image(results, self.args["image"], image_in=None)
+            c_hash = content_hash_file(self.args["image"])
+            mark_processed(c_hash, self.args["image"])
+            if self.qc:
+                opdir = os.path.join(os.path.dirname(os.path.abspath(self.args["image"])), 'niobium-io')
+                if not os.path.exists(opdir):
+                    os.makedirs(opdir)
+                self.save_qc_image(results, self.args["image"], path=opdir, image_in=None)
         elif self.args['directory'] != None:
             # Batch process
             console.print(f"[cyan]Starting batch processing {self.args['directory']}[/cyan]")
@@ -119,21 +128,32 @@ class niobium:
             img_list = self.get_images_in_directory(self.args['directory'])
             console.print(f"[cyan]{len(img_list)} images found[/cyan]")
             it = 1
+            skipped = 0
             for img_path in img_list:
                 console.print(f"[dim]\\[{it}/{len(img_list)}][/dim]")
+                c_hash = content_hash_file(img_path)
+                if not self.no_cache and is_processed(c_hash):
+                    console.print(f"[dim]Skipping {os.path.basename(img_path)} (already processed)[/dim]")
+                    skipped += 1
+                    it += 1
+                    continue
                 results, H, W, image_bytes = self.ocr_single_image(img_path, self.langs, self.gpu)
                 if self.merge_enabled:
                     results = self.merge_boxes(results, (self.merge_lim_x, self.merge_lim_y))
                 if self.smart:
                     from anki_niobium.llm import smart_filter_results
-                    results, extra = smart_filter_results(results, image_bytes, self.config)
+                    results, extra = smart_filter_results(results, image_bytes, {**self.config, "_no_cache": self.no_cache})
                 else:
                     results, extra = self.filter_results(results, self.config)
                 occlusion = self.get_occlusion_coords(results, H, W)
                 status = self.add_image_occlusion_deck(img_path, occlusion, self.args["deck_name"], extra, None,self.args["add_header"])
                 console.print(status[1])
-                self.save_qc_image(results, img_path, path=opdir, image_in=None)
+                mark_processed(c_hash, img_path)
+                if self.qc:
+                    self.save_qc_image(results, img_path, path=opdir, image_in=None)
                 it += 1
+            if skipped:
+                console.print(f"[dim]{skipped} image(s) skipped (already in cache)[/dim]")
         elif self.args['single_pdf'] != None:
             console.print("[cyan]Extracting images from the PDF[/cyan]")
             opdir = os.path.dirname(os.path.abspath(self.args['single_pdf']))
@@ -144,21 +164,33 @@ class niobium:
             all_images = self.extract_images_from_pdf(self.args['single_pdf'])
             console.print(f"[cyan]{len(all_images)} images were extracted from the PDF.[/cyan]")
             it = 1
+            skipped = 0
             for im in all_images:
                 console.print(f"[dim]\\[{it}/{len(all_images)}][/dim]")
+                im_bytes = niobium.byte_convert(im)
+                c_hash = content_hash_bytes(im_bytes)
+                if not self.no_cache and is_processed(c_hash):
+                    console.print(f"[dim]Skipping PDF image {it} (already processed)[/dim]")
+                    skipped += 1
+                    it += 1
+                    continue
                 results, H, W, image_bytes = self.ocr_single_image(None, self.langs, self.gpu, im)
                 if self.merge_enabled:
                     results = self.merge_boxes(results, (self.merge_lim_x, self.merge_lim_y))
                 if self.smart:
                     from anki_niobium.llm import smart_filter_results
-                    results, extra = smart_filter_results(results, image_bytes, self.config)
+                    results, extra = smart_filter_results(results, image_bytes, {**self.config, "_no_cache": self.no_cache})
                 else:
                     results, extra = self.filter_results(results, self.config)
                 occlusion = self.get_occlusion_coords(results, H, W)
                 status = self.add_image_occlusion_deck(None, occlusion, self.args["deck_name"], extra, im,self.args["add_header"])
                 console.print(status[1])
-                self.save_qc_image(results, None, path=opdir, image_in=im)
+                mark_processed(c_hash, f"pdf:{os.path.basename(self.args['single_pdf'])}")
+                if self.qc:
+                    self.save_qc_image(results, None, path=opdir, image_in=im)
                 it += 1
+            if skipped:
+                console.print(f"[dim]{skipped} image(s) skipped (already in cache)[/dim]")
 
     def export_apkg(self):
         """
@@ -188,24 +220,32 @@ class niobium:
         deck = genanki.Deck(random.randrange(1 << 30, 1 << 31), deck_name)
         media_files = []
 
-        def process_image(image_name, image_in=None):
+        def process_image(image_name, image_in=None, is_batch=False):
+            # Cache check: skip in batch context
+            if image_name:
+                c_hash = content_hash_file(image_name)
+            else:
+                c_hash = content_hash_bytes(niobium.byte_convert(image_in))
+            if is_batch and not self.no_cache and is_processed(c_hash):
+                console.print(f'[dim]Skipping (already processed)[/dim]')
+                return True  # skipped
+
             results, H, W, image_bytes = self.ocr_single_image(image_name, self.langs, self.gpu, image_in)
             if self.merge_enabled:
                 results = self.merge_boxes(results, (self.merge_lim_x, self.merge_lim_y))
             if self.smart:
                 from anki_niobium.llm import smart_filter_results
-                results, extra = smart_filter_results(results, image_bytes, self.config)
+                results, extra = smart_filter_results(results, image_bytes, {**self.config, "_no_cache": self.no_cache})
             else:
                 results, extra = self.filter_results(results, self.config)
             if not results:
                 console.print('[yellow]No occlusions found, skipping.[/yellow]')
-                return
+                return False
             occlusion = self.get_occlusion_coords(results, H, W)
 
             # Prepare image file for media
             hashed_name = niobium.get_image_hash(image_name) + '.png'
             if image_name:
-                # Copy image to a temp path with the hashed name
                 img = Image.open(image_name)
             else:
                 img = image_in
@@ -224,6 +264,8 @@ class niobium:
             )
             deck.add_note(note)
             console.print(f'[green]Note created with {len(results)} occlusions.[/green]')
+            mark_processed(c_hash, image_name or f"pdf:{os.path.basename(self.args.get('single_pdf', 'unknown'))}")
+            return False
 
         out_dir = self.args['apkg_out']
         os.makedirs(out_dir, exist_ok=True)
@@ -233,15 +275,23 @@ class niobium:
         elif self.args.get('directory'):
             img_list = self.get_images_in_directory(self.args['directory'])
             console.print(f'[cyan]{len(img_list)} images found.[/cyan]')
+            skipped = 0
             for i, img_path in enumerate(img_list, 1):
                 console.print(f'[dim]\\[{i}/{len(img_list)}][/dim]')
-                process_image(img_path)
+                if process_image(img_path, is_batch=True):
+                    skipped += 1
+            if skipped:
+                console.print(f"[dim]{skipped} image(s) skipped (already in cache)[/dim]")
         elif self.args.get('single_pdf'):
             all_images = self.extract_images_from_pdf(self.args['single_pdf'])
             console.print(f'[cyan]{len(all_images)} images extracted from PDF.[/cyan]')
+            skipped = 0
             for i, im in enumerate(all_images, 1):
                 console.print(f'[dim]\\[{i}/{len(all_images)}][/dim]')
-                process_image(None, image_in=im)
+                if process_image(None, image_in=im, is_batch=True):
+                    skipped += 1
+            if skipped:
+                console.print(f"[dim]{skipped} image(s) skipped (already in cache)[/dim]")
 
         apkg_path = os.path.join(out_dir, f'{deck_name}.apkg')
         pkg = genanki.Package(deck)
@@ -304,10 +354,8 @@ class niobium:
         return h.hexdigest()
 
     @staticmethod
-    def save_qc_image(results, image_name, path=None, image_in=None):
+    def save_qc_image(results, image_name, path, image_in=None):
         if image_name:
-            if path is None:
-                path = os.path.abspath(image_name)
             image = Image.open(image_name)
         else:
             image = image_in
@@ -320,14 +368,8 @@ class niobium:
             bl = (int(bl[0]), int(bl[1]))
             draw.rectangle([tl, br], outline="red", width=2)
         hashed_name = niobium.get_image_hash(image_name) + '.jpeg'
-        try:
-            image = image.convert('RGB')
-            image.save(os.path.join(path, hashed_name), quality=50)
-        except Exception as e:
-            console.print(f"[bold red]{e}[/bold red]")
-            console.print(f'[yellow]Issue with resolving paths, saving preview image at {os.getcwd()}[/yellow]')
-            image = image.convert('RGB')
-            image.save(hashed_name, quality=50)
+        image = image.convert('RGB')
+        image.save(os.path.join(path, hashed_name), quality=50)
 
     @staticmethod
     def get_occlusion_coords(results, H, W):
