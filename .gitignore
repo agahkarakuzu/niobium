@@ -5,7 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
-
+_build/
 # Distribution / packaging
 .Python
 build/
@@ -68,8 +68,9 @@ instance/
 # Scrapy stuff:
 .scrapy
 
-# Sphinx documentation
+# Documentation build output
 docs/_build/
+_build/
 
 # PyBuilder
 .pybuilder/
@@ -155,6 +156,7 @@ dmypy.json
 cython_debug/
 .ipynb_checkpoints
 .DS_Store
+.claude
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
