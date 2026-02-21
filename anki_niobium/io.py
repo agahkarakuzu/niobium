@@ -204,9 +204,9 @@ class niobium:
             raise SystemExit(0)
 
     def _prompt_instructions(self, instructions, llm_config):
-        """Interactive instruction prompt. Returns the active instruction string (or None)."""
+        """Interactive instruction prompt with arrow-key selection."""
+        import questionary
         from rich.panel import Panel
-        from rich.prompt import Prompt
 
         if instructions:
             console.print(Panel(
@@ -216,32 +216,54 @@ class niobium:
                 border_style="yellow",
                 padding=(0, 2),
             ))
-            choice = Prompt.ask(
-                "[bold][y][/bold] proceed, [bold][n][/bold] new instruction, [bold][c][/bold] clear",
-                choices=["y", "n", "c"],
-                default="y",
-            )
-            if choice == "y":
+            choice = questionary.select(
+                "Instructions:",
+                choices=[
+                    questionary.Choice("Use this instruction", value="keep"),
+                    questionary.Choice("Enter a new instruction", value="new"),
+                    questionary.Choice("Clear (no instructions)", value="clear"),
+                ],
+            ).ask()
+            if choice is None:  # Ctrl+C
+                raise SystemExit(0)
+            if choice == "keep":
                 return instructions
-            elif choice == "c":
+            if choice == "clear":
                 llm_config["instructions"] = None
-                console.print("[dim]Instructions cleared for this run.[/dim]")
-                if Confirm.ask("Also remove from config file?", default=False):
+                save = questionary.select(
+                    "Also remove from config file?",
+                    choices=[
+                        questionary.Choice("No, just this run", value=False),
+                        questionary.Choice("Yes, update config", value=True),
+                    ],
+                ).ask()
+                if save is None:
+                    raise SystemExit(0)
+                if save:
                     self._update_config_instructions(None)
                 return None
-            # choice == "n": fall through to new instruction input
+            # choice == "new": fall through
         else:
-            if not Confirm.ask("Add instructions for this run?", default=False):
+            choice = questionary.select(
+                "Instructions:",
+                choices=[
+                    questionary.Choice("No instructions (use defaults)", value="skip"),
+                    questionary.Choice("Enter an instruction", value="new"),
+                ],
+            ).ask()
+            if choice is None:
+                raise SystemExit(0)
+            if choice == "skip":
                 return None
 
         # --- Get new instruction ---
-        new_instr = Prompt.ask("[bold yellow]Instruction[/bold yellow]")
+        new_instr = questionary.text("Instruction:").ask()
+        if new_instr is None:
+            raise SystemExit(0)
         if not new_instr.strip():
-            console.print("[dim]No instruction entered.[/dim]")
             return instructions  # keep whatever was there
 
         llm_config["instructions"] = new_instr
-
         console.print(Panel(
             f"[yellow]{new_instr}[/yellow]",
             title="[bold yellow]Instructions[/bold yellow]",
@@ -249,12 +271,19 @@ class niobium:
             border_style="yellow",
             padding=(0, 2),
         ))
-
-        if Confirm.ask("Save to config for future runs?", default=False):
+        save = questionary.select(
+            "Save to config for future runs?",
+            choices=[
+                questionary.Choice("No, one-time only", value=False),
+                questionary.Choice("Yes, update config", value=True),
+            ],
+        ).ask()
+        if save is None:
+            raise SystemExit(0)
+        if save:
             self._update_config_instructions(new_instr)
         else:
             console.print("[dim]One-time instruction (config unchanged).[/dim]")
-
         return new_instr
 
     def _update_config_instructions(self, new_value):

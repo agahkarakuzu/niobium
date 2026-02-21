@@ -39,6 +39,7 @@ dependencies = [
     "pymupdf4llm",
     "pyyaml",
     "rich-argparse",
+    "questionary",
 ]
 
 [project.urls]
