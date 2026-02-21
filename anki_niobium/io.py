@@ -11,6 +11,7 @@ import re
 import fitz
 from tqdm import tqdm
 from io import BytesIO
+from pathlib import Path
 import click
 from datetime import datetime
 import random
@@ -20,6 +21,25 @@ ANKI_LOCAL = "http://localhost:8765"
 class niobium:
     def __init__(self, args):
         self.args = args
+        self.config_path = niobium.resolve_config(self.args.get("config"))
+
+    @staticmethod
+    def resolve_config(config_path=None):
+        if config_path:
+            p = Path(config_path)
+            if not p.is_file():
+                raise FileNotFoundError(f"Config file not found: {config_path}")
+            print(f'[INFO] --> Using config: {p}')
+            return str(p)
+
+        user_config = Path.home() / ".config" / "niobium" / "config.json"
+        if user_config.is_file():
+            print(f'[INFO] --> Using config: {user_config}')
+            return str(user_config)
+
+        default_config = Path(__file__).parent / "default_config.json"
+        print(f'[INFO] --> Using config: {default_config} (bundled default)')
+        return str(default_config)
 
     def ocr4io(self):
         """
@@ -41,9 +61,9 @@ class niobium:
             results, H, W = self.ocr_single_image(self.args["image"], self.args["langs"], self.args["gpu"])
             if self.args["merge_rects"]:
                 results = self.merge_boxes(results, (self.args["merge_lim_x"], self.args["merge_lim_y"]))
-                results, extra = self.filter_results(results)
+                results, extra = self.filter_results(results, self.config_path)
             else:
-                results, extra = self.filter_results(results)
+                results, extra = self.filter_results(results, self.config_path)
             occlusion = self.get_occlusion_coords(results, H, W)
             status = self.add_image_occlusion_deck(self.args["image"], occlusion, self.args["deck_name"], extra, None,self.args["add_header"])
             print(status[1])
@@ -64,9 +84,9 @@ class niobium:
                 if self.args["merge_rects"]:
                     results = self.merge_boxes2(results, (self.args["merge_lim_x"], self.args["merge_lim_y"]))
                     results = self.clean_boxes(results)
-                    results, extra = self.filter_results(results)
+                    results, extra = self.filter_results(results, self.config_path)
                 else:
-                    results, extra = self.filter_results(results)
+                    results, extra = self.filter_results(results, self.config_path)
                 occlusion = self.get_occlusion_coords(results, H, W)
                 status = self.add_image_occlusion_deck(img_path, occlusion, self.args["deck_name"], extra, None,self.args["add_header"])
                 print(status[1])
@@ -87,9 +107,9 @@ class niobium:
                 results, H, W = self.ocr_single_image(None, self.args["langs"], self.args["gpu"], im)
                 if self.args["merge_rects"]:
                     results = self.merge_boxes(results, (self.args["merge_lim_x"], self.args["merge_lim_y"]))
-                    results, extra = self.filter_results(results)
+                    results, extra = self.filter_results(results, self.config_path)
                 else:
-                    results, extra = self.filter_results(results)
+                    results, extra = self.filter_results(results, self.config_path)
                 occlusion = self.get_occlusion_coords(results, H, W)
                 status = self.add_image_occlusion_deck(None, occlusion, self.args["deck_name"], extra, im,self.args["add_header"])
                 print(status[1])
@@ -110,8 +130,8 @@ class niobium:
         return reversed_string
 
     @staticmethod
-    def filter_results(results):
-        with open('config.json') as f:
+    def filter_results(results, config_path):
+        with open(config_path) as f:
             config = json.load(f)
         filtered_results = []
         extra = ''
