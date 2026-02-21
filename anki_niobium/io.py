@@ -179,28 +179,114 @@ class niobium:
         panel_parts.append(f"[bold]Card types:[/bold] {card_note}")
         if self.max_cards:
             panel_parts.append(f"[bold]Max cards:[/bold]  {self.max_cards} per page/image")
-        if instructions:
-            panel_parts.append(f"[bold yellow]>>> Instructions:[/bold yellow] [yellow]{instructions}[/yellow]")
-        else:
-            panel_parts.append("[dim]No custom instructions (Claude uses defaults)[/dim]")
         if self.no_cache:
             panel_parts.append("[bold]Cache:[/bold] disabled for this run")
         if self.work_dir:
             panel_parts.append(f"[bold]Artifacts:[/bold] {self.work_dir}")
 
         from rich.panel import Panel
+        from rich.prompt import Prompt
         console.print(Panel(
             "\n".join(panel_parts),
             title=f"[bold cyan]{mode}[/bold cyan]",
             border_style="cyan",
             padding=(1, 2),
         ))
+
+        # --- Instruction handling ---
+        instructions = self._prompt_instructions(instructions, llm_config)
+
         if not Confirm.ask("Proceed?", default=True):
             console.print("[yellow]Aborted.[/yellow]")
             import shutil
             if self.work_dir:
                 shutil.rmtree(self.work_dir, ignore_errors=True)
             raise SystemExit(0)
+
+    def _prompt_instructions(self, instructions, llm_config):
+        """Interactive instruction prompt. Returns the active instruction string (or None)."""
+        from rich.panel import Panel
+        from rich.prompt import Prompt
+
+        if instructions:
+            console.print(Panel(
+                f"[yellow]{instructions}[/yellow]",
+                title="[bold yellow]Instructions[/bold yellow]",
+                subtitle="[dim]from config[/dim]",
+                border_style="yellow",
+                padding=(0, 2),
+            ))
+            choice = Prompt.ask(
+                "[bold][y][/bold] proceed, [bold][n][/bold] new instruction, [bold][c][/bold] clear",
+                choices=["y", "n", "c"],
+                default="y",
+            )
+            if choice == "y":
+                return instructions
+            elif choice == "c":
+                llm_config["instructions"] = None
+                console.print("[dim]Instructions cleared for this run.[/dim]")
+                if Confirm.ask("Also remove from config file?", default=False):
+                    self._update_config_instructions(None)
+                return None
+            # choice == "n": fall through to new instruction input
+        else:
+            if not Confirm.ask("Add instructions for this run?", default=False):
+                return None
+
+        # --- Get new instruction ---
+        new_instr = Prompt.ask("[bold yellow]Instruction[/bold yellow]")
+        if not new_instr.strip():
+            console.print("[dim]No instruction entered.[/dim]")
+            return instructions  # keep whatever was there
+
+        llm_config["instructions"] = new_instr
+
+        console.print(Panel(
+            f"[yellow]{new_instr}[/yellow]",
+            title="[bold yellow]Instructions[/bold yellow]",
+            subtitle="[dim]this run[/dim]",
+            border_style="yellow",
+            padding=(0, 2),
+        ))
+
+        if Confirm.ask("Save to config for future runs?", default=False):
+            self._update_config_instructions(new_instr)
+        else:
+            console.print("[dim]One-time instruction (config unchanged).[/dim]")
+
+        return new_instr
+
+    def _update_config_instructions(self, new_value):
+        """Update the instructions field in the user's config file."""
+        cfg_path = self.config_path
+        bundled = str(Path(__file__).parent / "default_config.yaml")
+        if cfg_path == bundled:
+            console.print("[yellow]Cannot write to bundled default config. Run --init-config first.[/yellow]")
+            return
+        try:
+            with open(cfg_path) as f:
+                raw = f.read()
+            # YAML-aware update: replace the instructions line
+            if new_value is None:
+                raw = re.sub(
+                    r'^(\s*instructions:\s*).*$',
+                    r'\g<1>null',
+                    raw, count=1, flags=re.MULTILINE,
+                )
+            else:
+                # Quote the value to handle special characters
+                escaped = new_value.replace('"', '\\"')
+                raw = re.sub(
+                    r'^(\s*instructions:\s*).*$',
+                    f'\\g<1>"{escaped}"',
+                    raw, count=1, flags=re.MULTILINE,
+                )
+            with open(cfg_path, 'w') as f:
+                f.write(raw)
+            console.print(f"[green]Config updated: {cfg_path}[/green]")
+        except Exception as e:
+            console.print(f"[red]Failed to update config: {e}[/red]")
 
     @staticmethod
     def _show_cache_hit(label, cached_info):
