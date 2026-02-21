@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
 
+env:
+  # `BASE_URL` determines the website is served from, including CSS & JS assets
+  # You may need to change this to `BASE_URL: ''`
+  BASE_URL: /${{ github.event.repository.name }}
+
 permissions:
   contents: read
   pages: write
@@ -17,7 +22,7 @@ jobs:
   deploy:
     environment:
       name: github-pages
-      url: ${{ github.event.deployment.payload.web_url || steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
