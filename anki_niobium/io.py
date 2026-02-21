@@ -180,7 +180,7 @@ class niobium:
         if self.max_cards:
             panel_parts.append(f"[bold]Max cards:[/bold]  {self.max_cards} per page/image")
         if instructions:
-            panel_parts.append(f"[bold]Instructions:[/bold] {instructions}")
+            panel_parts.append(f"[bold yellow]>>> Instructions:[/bold yellow] [yellow]{instructions}[/yellow]")
         else:
             panel_parts.append("[dim]No custom instructions (Claude uses defaults)[/dim]")
         if self.no_cache:
@@ -400,23 +400,108 @@ class niobium:
             if skipped:
                 console.print(f"[dim]{skipped} image(s) skipped (already in cache)[/dim]")
 
+    @staticmethod
+    def _validate_and_fix_card(card, has_image):
+        """
+        Validate a card from Claude's response and attempt auto-repair.
+        Returns (valid, reason, fixes_applied).
+        fixes_applied is a list of strings describing what was fixed (empty if nothing).
+        The card dict is modified in-place when fixable.
+        """
+        fixes = []
+        card_type = card.get("type")
+        if not card_type:
+            return False, "missing 'type' field", fixes
+        if card_type not in ("image_occlusion", "cloze", "basic"):
+            return False, f"unknown card type '{card_type}'", fixes
+
+        if card_type == "image_occlusion":
+            if not has_image:
+                return False, "image_occlusion without an image", fixes
+            occlusions = card.get("occlusions")
+            if not occlusions:
+                return False, "image_occlusion with no occlusions", fixes
+            cleaned = []
+            for occ in occlusions:
+                missing = [k for k in ("left", "top", "width", "height") if k not in occ]
+                if missing:
+                    fixes.append(f"dropped occlusion missing {', '.join(missing)}")
+                    continue
+                # Clamp coordinates to 0.0-1.0
+                clamped = False
+                for key in ("left", "top", "width", "height"):
+                    val = occ[key]
+                    clamped_val = max(0.0, min(1.0, val))
+                    if clamped_val != val:
+                        occ[key] = clamped_val
+                        clamped = True
+                if clamped:
+                    fixes.append("clamped coordinates to 0.0-1.0")
+                cleaned.append(occ)
+            if not cleaned:
+                return False, "all occlusions invalid", fixes
+            card["occlusions"] = cleaned
+
+        elif card_type == "cloze":
+            text = card.get("text", "")
+            if not text.strip():
+                return False, "cloze with empty text", fixes
+            if "{{c" not in text:
+                # Try to rescue: convert **bold** or __underline__ to cloze
+                import re
+                counter = [0]
+                def _to_cloze(m):
+                    counter[0] += 1
+                    return "{{c" + str(counter[0]) + "::" + m.group(1) + "}}"
+                repaired = re.sub(r'\*\*(.+?)\*\*', _to_cloze, text)
+                if counter[0] == 0:
+                    repaired = re.sub(r'__(.+?)__', _to_cloze, text)
+                if counter[0] > 0:
+                    card["text"] = repaired
+                    fixes.append(f"converted {counter[0]} bold/underline marker(s) to cloze syntax")
+                else:
+                    return False, "cloze text has no {{c1::...}} syntax and no bold markers to convert", fixes
+
+        elif card_type == "basic":
+            if not card.get("front", "").strip():
+                return False, "basic card with empty front", fixes
+            if not card.get("back", "").strip():
+                return False, "basic card with empty back", fixes
+
+        return True, "", fixes
+
     def deliver_generated_cards(self, card_data, page_image, page_index,
                                 deck_name=None, deck=None, media_files=None,
                                 tmp_media_dir=None):
         cards = card_data.get("cards", [])
+        has_image = page_image is not None
         created = 0
+        skipped = 0
 
-        for card in cards:
+        for i, card in enumerate(cards, 1):
+            valid, reason, fixes = niobium._validate_and_fix_card(card, has_image)
+            if fixes:
+                console.print(f"[cyan]  Card {i} auto-fixed: {'; '.join(fixes)}[/cyan]")
+            if not valid:
+                console.print(f"[yellow]  Skipping card {i}: {reason}[/yellow]")
+                skipped += 1
+                continue
+
             card_type = card["type"]
             hint = card.get("hint", "")
 
             if card_type == "image_occlusion":
                 occlusion_str = ""
                 for idx, occ in enumerate(card.get("occlusions", []), 1):
-                    left = format(occ["left"], '.4f').lstrip('0')
-                    top = format(occ["top"], '.4f').lstrip('0')
-                    width = format(occ["width"], '.4f').lstrip('0')
-                    height = format(occ["height"], '.4f').lstrip('0')
+                    # Clamp coordinates to 0.0-1.0
+                    left = max(0.0, min(1.0, occ["left"]))
+                    top = max(0.0, min(1.0, occ["top"]))
+                    width = max(0.0, min(1.0, occ["width"]))
+                    height = max(0.0, min(1.0, occ["height"]))
+                    left = format(left, '.4f').lstrip('0')
+                    top = format(top, '.4f').lstrip('0')
+                    width = format(width, '.4f').lstrip('0')
+                    height = format(height, '.4f').lstrip('0')
                     occlusion_str += f"{{{{c{idx}::image-occlusion:rect:left={left}:top={top}:width={width}:height={height}:oi=1}}}};"
 
                 if deck_name:
@@ -452,9 +537,7 @@ class niobium:
                 created += 1
 
             elif card_type == "cloze":
-                text = card.get("text", "")
-                if not text:
-                    continue
+                text = card["text"]
                 if deck_name:
                     status = niobium.add_cloze_note(text, deck_name, hint)
                     console.print(status[1])
@@ -468,10 +551,8 @@ class niobium:
                 created += 1
 
             elif card_type == "basic":
-                front = card.get("front", "")
-                back = card.get("back", "")
-                if not front:
-                    continue
+                front = card["front"]
+                back = card["back"]
                 if hint:
                     back = f"{back}<br><hr><i>{hint}</i>"
                 if deck_name:
@@ -486,6 +567,8 @@ class niobium:
                     deck.add_note(note)
                 created += 1
 
+        if skipped:
+            console.print(f"[yellow]  {skipped} card(s) skipped due to validation errors[/yellow]")
         return created
 
     def _collect_generate_items(self):

@@ -50,8 +50,12 @@ llm:
   # Default max cards per page (null = let Claude decide, override with --max-cards)
   max_cards: null
 
-  # Custom instructions appended to the system prompt
-  # Example: "Only create flashcards from KEY FACT boxes. Ignore body text."
+  # Custom instructions that OVERRIDE default card generation behavior.
+  # These take highest priority — Claude will follow them over its defaults.
+  # Examples:
+  #   "Only create flashcards from KEY FACT boxes. Ignore body text."
+  #   "Focus on mnemonics and clinical pearls only."
+  #   "Create cards in French. Use simple vocabulary."
   instructions: null
 
 # ── Work directory ──────────────────────────────────────────────────

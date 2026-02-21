@@ -10,13 +10,13 @@ from anki_niobium.cache import content_hash_bytes, get_cached_claude_response, s
 
 console = Console()
 
-DEFAULT_SMART_PROMPT = """You are helping medical and science students create effective Anki flashcards from educational images using image occlusion.
+DEFAULT_SMART_PROMPT = """You are an expert at creating effective Anki flashcards using image occlusion.
 
 You will receive an image alongside OCR-detected text regions. You can SEE the image — use your visual understanding to:
-1. Understand what the image depicts (anatomy, histology, pathology, pharmacology, biochemistry, etc.)
+1. Understand what the image depicts
 2. Determine which text regions are educationally valuable to quiz on
-3. Correct any OCR misreadings by comparing the OCR text against what you actually see in the image
-4. Generate genuinely useful study hints that go beyond simple definitions
+3. Correct any OCR misreadings by comparing the OCR text against what you actually see
+4. Generate genuinely useful study hints
 
 RESPONSE FORMAT — respond with ONLY this JSON:
 {
@@ -26,7 +26,7 @@ RESPONSE FORMAT — respond with ONLY this JSON:
       "index": 0,
       "action": "occlude",
       "corrected_text": "Corrected version if OCR misread it, otherwise omit this field",
-      "hint": "Clinically relevant context, function, or study aid"
+      "hint": "Relevant context or study aid"
     },
     {
       "index": 1,
@@ -37,13 +37,12 @@ RESPONSE FORMAT — respond with ONLY this JSON:
 }
 
 WHAT TO OCCLUDE (test-worthy content):
-- Anatomical structures, organs, tissue layers, cell types
-- Disease names, pathological findings, diagnostic criteria
-- Drug names, drug classes, mechanisms of action, side effects
-- Key numerical values (lab reference ranges, dosages, percentages)
-- Biochemical pathways, enzymes, substrates, products
-- Microorganisms, vectors, transmission routes
-- Any specific term a professor would ask about on an exam
+- Key terms, definitions, named concepts
+- Labels on diagrams, charts, maps, figures
+- Formulas, equations, numerical values
+- Names, dates, classifications, categories
+- Technical vocabulary and domain-specific terms
+- Any specific term that would be tested in an exam
 
 WHAT TO SKIP (not test-worthy):
 - Figure labels and panel identifiers (A, B, C, Fig. 1, Panel 2)
@@ -54,21 +53,28 @@ WHAT TO SKIP (not test-worthy):
 - Arrow markers or generic pointers that are not terms
 
 HINTS — make them genuinely useful for learning:
-- Clinical correlations: "Commonly injured in shoulder dislocations"
-- Functional notes: "Produces bile and detoxifies blood"
-- Alternative/Latin names: "Also called epinephrine"
-- Distinguishing features: "Unlike skeletal muscle, contracts involuntarily"
-- Pathology links: "Inflammation here causes peritonitis"
+- Functional notes: "Controls blood sugar levels"
+- Relationships: "Opposite of inflation"
+- Distinguishing features: "Unlike X, this does Y"
 - Mnemonic aids when obvious: "Afferent = Arrives, Efferent = Exits"
 - Keep under 20 words. Only add a hint when it genuinely aids recall.
 
 OCR CORRECTION:
 - Compare each OCR text against what you see in the image
-- Medical terms are often misread (e.g., "Glcmerulus" → "Glomerulus")
+- Technical terms are often misread by OCR — correct them
 - Only include "corrected_text" when the OCR text is actually wrong
 - If the OCR is correct, omit the "corrected_text" field entirely
 
 WHEN IN DOUBT: Occlude. It is better to quiz on something than to miss it.
+
+PRIORITY INSTRUCTIONS HANDLING:
+When the user provides instructions below, they are ABSOLUTE — override ALL defaults above.
+- Interpret instructions LITERALLY. If the user says "only from key facts", look for
+  visually distinct elements labeled "KEY FACT" (boxes, callouts, sidebars) and only
+  occlude text found within those elements. Skip everything else.
+- When instructions say "only" or "exclusively", skip ALL content that does not match,
+  even if it would normally be occluded. Return fewer decisions rather than violating
+  the user's constraint.
 """
 
 # Module-level client cache to avoid recreating per image in batch mode
@@ -145,7 +151,7 @@ def smart_filter_results(results, image_bytes, config):
 
     instructions = llm_config.get("instructions")
     if instructions:
-        system_prompt = DEFAULT_SMART_PROMPT + f"\nADDITIONAL INSTRUCTIONS FROM USER:\n{instructions}\n"
+        system_prompt = DEFAULT_SMART_PROMPT + f"\nPRIORITY INSTRUCTIONS (override defaults above):\n{instructions}\n"
     else:
         system_prompt = DEFAULT_SMART_PROMPT
 
@@ -284,17 +290,21 @@ def smart_filter_results(results, image_bytes, config):
     return (filtered_results, extra)
 
 
-SMART_GENERATE_PROMPT = """You are helping medical and science students create effective Anki flashcards from a PDF page.
+SMART_GENERATE_PROMPT = """You are an expert flashcard creator. You analyze educational content and produce effective Anki flashcards that follow evidence-based study principles.
 
-You can SEE the full page. Analyze its content and create the best flashcards possible. You may create multiple cards from a single page.
+You will receive content from a PDF page — either as an image, extracted text, or both. Analyze the content and create the best flashcards possible.
 
 For each card, choose the most appropriate type:
 
-1. **image_occlusion**: When the page has a diagram, figure, or labeled image where hiding labels/regions and asking the student to recall them is effective. Provide rectangular coordinates (as fractions of page width/height) for regions to occlude.
+1. **image_occlusion**: ONLY when the image contains labeled regions, annotated diagrams, or text overlaid on a figure where hiding a label and asking the learner to recall it makes sense. The image must have identifiable text or symbols to occlude. Do NOT create image_occlusion for:
+   - Photos or illustrations with no labels/annotations
+   - Charts where all information is better captured as text
+   - Decorative images that add no educational value
+   Provide rectangular coordinates as fractions of image width/height (0.0 to 1.0).
 
-2. **cloze**: When the page has important factual statements, definitions, or concepts that work well as fill-in-the-blank. Use Anki cloze syntax: {{c1::answer}} for the hidden part. You can have multiple cloze deletions in one card (c1, c2, c3...).
+2. **cloze**: When there are important facts, definitions, formulas, or concepts that work well as fill-in-the-blank. Use Anki cloze syntax: {{c1::answer}}. Multiple cloze deletions per card are fine (c1, c2, c3...). When extracted text is provided, quote it accurately for cloze cards.
 
-3. **basic**: When the content is best tested as a question/answer pair. Provide a clear question for the front and a concise answer for the back.
+3. **basic**: When the content is best tested as a question/answer pair. Also use this for visual content that isn't suited for occlusion — e.g., "What does [structure/process] look like?" with a description as the answer.
 
 RESPONSE FORMAT — respond with ONLY this JSON:
 {
@@ -303,63 +313,71 @@ RESPONSE FORMAT — respond with ONLY this JSON:
     {
       "type": "image_occlusion",
       "occlusions": [
-        {
-          "left": 0.1234,
-          "top": 0.2345,
-          "width": 0.0500,
-          "height": 0.0300,
-          "label": "What is hidden here"
-        }
+        {"left": 0.12, "top": 0.23, "width": 0.05, "height": 0.03, "label": "What is hidden here"}
       ],
-      "hint": "Optional context or hint for the back of the card"
+      "hint": "Optional context"
     },
     {
       "type": "cloze",
       "text": "The {{c1::mitochondria}} is the powerhouse of the {{c2::cell}}.",
-      "hint": "Optional extra info for the back"
+      "hint": "Optional extra info"
     },
     {
       "type": "basic",
-      "front": "What enzyme catalyzes the first step of glycolysis?",
-      "back": "Hexokinase",
-      "hint": "Optional extra context"
+      "front": "Clear, specific question?",
+      "back": "Concise answer",
+      "hint": "Optional context"
     }
   ]
 }
 
-GUIDELINES:
-- Create cards that are educationally valuable — focus on exam-worthy content
-- For image occlusion: provide coordinates as fractions (0.0 to 1.0) of page width/height
-- For cloze: ensure the sentence reads naturally and tests one concept per cloze
-- For basic: make questions specific and unambiguous
-- Skip page numbers, headers/footers, copyright notices, and other metadata
-- Aim for 1-10 cards per page depending on content density
-- Each card should test ONE concept (atomic cards principle)
-- If the page is mostly a figure/diagram, prefer image_occlusion
-- If the page is mostly text, prefer cloze and basic cards
-- You can mix card types for a single page
+CARD QUALITY PRINCIPLES:
+- Each card tests ONE concept (atomic cards)
+- Cloze deletions should test recall, not recognition — hide the hard part
+- Basic card questions must be specific and unambiguous
+- Hints should aid understanding, not give away the answer
+- Skip metadata: page numbers, headers/footers, copyright, watermarks
+- Prefer cloze for factual/definitional content, basic for conceptual "why/how" questions
+- Only use image_occlusion when the image has labeled regions worth hiding
+- If an image has no text/labels to occlude, describe it in a basic card or skip it
+- When both image and text are provided, use the text for accurate cloze quotes and the image for spatial/visual understanding
+- Generate as many cards as the content warrants (typically 1-10 per page) — never pad to fill a quota
+
+PRIORITY INSTRUCTIONS HANDLING:
+When the user provides instructions below, they are ABSOLUTE — override ALL defaults.
+- Interpret instructions LITERALLY. If the user says "only from key facts", look for
+  visually distinct elements on the page labeled "KEY FACT" (boxes, callouts, sidebars,
+  highlighted sections) and create cards ONLY from those. Ignore all surrounding body text.
+- If the instruction references a specific visual element (e.g., "key facts", "tables",
+  "diagrams", "highlighted boxes", "mnemonics"), scan the page for those elements and
+  restrict card generation to content found within them.
+- When instructions say "only" or "exclusively", generate ZERO cards from content that
+  does not match. Return fewer cards or even an empty cards list rather than violating
+  the user's constraint.
 """
 
 
 def smart_generate_cards(page_index, page_image_bytes, config, max_cards=None, card_type=None, page_text=None, page_label=None):
     """
-    Use Claude Vision to analyze a full PDF page render and generate cards
-    of multiple types (image_occlusion, cloze, basic).
+    Use Claude to analyze page content and generate cards of multiple types.
 
-    When page_text is provided (text-only page), sends text instead of an image
-    to save on API costs. Image occlusion cards are excluded for text-only pages.
+    Three sending modes based on available content:
+      - text:        markdown only (no figures on page)
+      - image + text: full page render + markdown (page has figures)
+      - image:       image only (standalone image input, no PDF text)
 
     page_label is the user-visible page number (from PDF labels); falls back to
     page_index + 1 when not provided.
     """
     display_page = page_label or str(page_index + 1)
-    text_only = page_image_bytes is None and page_text is not None
+    has_image = page_image_bytes is not None
+    has_text = page_text is not None and len(page_text.strip()) > 0
     llm_config = config.get("llm", {})
 
     api_key = llm_config.get("api_key") or os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        console.print("[bold red]No API key found. --smart --page requires ANTHROPIC_API_KEY.[/bold red]")
-        raise ValueError("API key required for smart page generation")
+        console.print("[bold red]No API key found. --smart requires ANTHROPIC_API_KEY.[/bold red]")
+        raise ValueError("API key required for smart generation")
 
     model = llm_config.get("model", "claude-sonnet-4-6")
     max_tokens = llm_config.get("max_tokens_generate", 4096)
@@ -367,26 +385,27 @@ def smart_generate_cards(page_index, page_image_bytes, config, max_cards=None, c
 
     instructions = llm_config.get("instructions")
     if instructions:
-        system_prompt = SMART_GENERATE_PROMPT + f"\nADDITIONAL INSTRUCTIONS FROM USER:\n{instructions}\n"
+        system_prompt = SMART_GENERATE_PROMPT + f"\nPRIORITY INSTRUCTIONS (override defaults above):\n{instructions}\n"
     else:
         system_prompt = SMART_GENERATE_PROMPT
 
     constraints = []
-    if text_only:
-        constraints.append("This is a TEXT-ONLY page (no images or diagrams). Do NOT generate image_occlusion cards. Only generate 'cloze' and/or 'basic' cards.")
+    if not has_image:
+        constraints.append("No image is provided. Do NOT generate image_occlusion cards. Only generate 'cloze' and/or 'basic' cards.")
     if max_cards:
-        constraints.append(f"Generate AT MOST {max_cards} cards for this page.")
+        constraints.append(f"Generate no more than {max_cards} cards for this page. This is a CEILING, not a target — if the content only warrants fewer cards, generate fewer. Never pad to reach this number.")
     if card_type:
-        type_label = card_type.replace("_", " ")
         constraints.append(f"ONLY generate cards of type '{card_type}'. Do not use any other card type.")
     if constraints:
         system_prompt += "\nCONSTRAINTS:\n" + "\n".join(f"- {c}" for c in constraints) + "\n"
 
-    if text_only:
-        content_hash = content_hash_bytes(page_text.encode("utf-8"))
-    else:
+    # Cache key accounts for the sending mode
+    if has_image:
         content_hash = content_hash_bytes(page_image_bytes)
-    cache_text_key = f"smart_generate_page_{page_index}_max{max_cards}_type{card_type}_textonly{text_only}"
+    else:
+        content_hash = content_hash_bytes(page_text.encode("utf-8"))
+    mode_tag = "img_text" if (has_image and has_text) else ("text" if has_text else "img")
+    cache_text_key = f"smart_generate_page_{page_index}_max{max_cards}_type{card_type}_mode{mode_tag}"
     no_cache = config.get("_no_cache", False)
 
     cached = None
@@ -397,15 +416,31 @@ def smart_generate_cards(page_index, page_image_bytes, config, max_cards=None, c
         data = cached
         from_cache = True
     else:
-        if text_only:
-            mode_label = "text"
+        # Build user message based on available content
+        if has_image and has_text:
+            mode_label = "image + text"
+            image_b64 = base64.b64encode(page_image_bytes).decode("utf-8")
             user_content = [
                 {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": image_b64,
+                    },
+                },
+                {
                     "type": "text",
-                    "text": f"This is the text content of page {display_page} of a PDF. There are no images or diagrams on this page.\n\n---\n{page_text}\n---\n\nAnalyze this text and generate flashcards.",
+                    "text": (
+                        f"This is page {display_page} of a PDF. The image shows the full page render. "
+                        f"Below is the structured text extracted from this page:\n\n"
+                        f"---\n{page_text}\n---\n\n"
+                        f"Use BOTH the image (for visual content, diagrams, spatial layout) "
+                        f"and the extracted text (for accurate quotes in cloze cards) to generate flashcards."
+                    ),
                 },
             ]
-        else:
+        elif has_image:
             mode_label = "image"
             image_b64 = base64.b64encode(page_image_bytes).decode("utf-8")
             user_content = [
@@ -419,13 +454,26 @@ def smart_generate_cards(page_index, page_image_bytes, config, max_cards=None, c
                 },
                 {
                     "type": "text",
-                    "text": f"This is page {display_page} of a PDF. Analyze it and generate flashcards.",
+                    "text": f"Analyze this image and generate flashcards.",
+                },
+            ]
+        else:
+            mode_label = "text"
+            user_content = [
+                {
+                    "type": "text",
+                    "text": (
+                        f"This is the text content of page {display_page} of a PDF. "
+                        f"There are no diagrams or figures on this page.\n\n"
+                        f"---\n{page_text}\n---\n\n"
+                        f"Analyze this text and generate flashcards."
+                    ),
                 },
             ]
 
         try:
             client = _get_client(api_key)
-            console.print(f"[cyan]Sending page {display_page} ({mode_label}) to Claude ({model}) for card generation...[/cyan]")
+            console.print(f"[cyan]Sending page {display_page} ({mode_label}) to Claude ({model})...[/cyan]")
             response = client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
