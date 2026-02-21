@@ -29,11 +29,22 @@ def _get_conn():
 def _init_tables(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS processed (
-            content_hash  TEXT PRIMARY KEY,
-            source        TEXT,
-            processed_at  REAL
+            content_hash    TEXT PRIMARY KEY,
+            source          TEXT,
+            processed_at    REAL,
+            output_path     TEXT,
+            artifacts_path  TEXT
         )
     """)
+    # Migrate existing tables that lack the new columns
+    try:
+        conn.execute("ALTER TABLE processed ADD COLUMN output_path TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE processed ADD COLUMN artifacts_path TEXT")
+    except sqlite3.OperationalError:
+        pass
     conn.execute("""
         CREATE TABLE IF NOT EXISTS claude_cache (
             cache_key      TEXT PRIMARY KEY,
@@ -62,16 +73,19 @@ def content_hash_bytes(data):
 # ── Processed-image table ────────────────────────────────────────────
 
 def is_processed(content_hash):
+    """Check if content was already processed. Returns dict with paths if found, None otherwise."""
     row = _get_conn().execute(
-        "SELECT 1 FROM processed WHERE content_hash = ?", (content_hash,)
+        "SELECT source, output_path, artifacts_path FROM processed WHERE content_hash = ?", (content_hash,)
     ).fetchone()
-    return row is not None
+    if row is not None:
+        return {"source": row[0], "output_path": row[1], "artifacts_path": row[2]}
+    return None
 
 
-def mark_processed(content_hash, source):
+def mark_processed(content_hash, source, output_path=None, artifacts_path=None):
     _get_conn().execute(
-        "INSERT OR REPLACE INTO processed (content_hash, source, processed_at) VALUES (?, ?, ?)",
-        (content_hash, source, time.time()),
+        "INSERT OR REPLACE INTO processed (content_hash, source, processed_at, output_path, artifacts_path) VALUES (?, ?, ?, ?, ?)",
+        (content_hash, source, time.time(), output_path, artifacts_path),
     )
     _get_conn().commit()
 

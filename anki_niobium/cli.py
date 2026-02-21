@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 from rich.console import Console
 from rich.panel import Panel
@@ -70,9 +71,9 @@ def main():
     # Config management
     config_group = ap.add_argument_group("config management")
     config_group.add_argument("--init-config", action="store_true", default=False,
-        help="create a config file at ~/.config/niobium/config.json")
+        help="create a config file at ~/.config/niobium/config.yaml")
     config_group.add_argument("--edit-config", action="store_true", default=False,
-        help="open the config file in $EDITOR")
+        help="open the config directory in Finder")
     config_group.add_argument("--clear-cache", action="store_true", default=False,
         help="clear the processing cache and exit")
 
@@ -85,14 +86,14 @@ def main():
     group.add_argument("-pin", "--single-pdf", type=str, default=None,
         help="abs path to a single PDF")
 
-    # This group requires a type of output
-    group2 = ap.add_mutually_exclusive_group(required=True)
-    group2.add_argument("-deck", "--deck-name", type=str, default='Default',
-        help="anki deck where the notes will be pushed to (requires anki-connect) (default Default)")
+    # Output — mutually exclusive; optional when work_dir is configured
+    group2 = ap.add_mutually_exclusive_group(required=False)
+    group2.add_argument("-deck", "--deck-name", type=str, default=None,
+        help="anki deck where the notes will be pushed to (requires anki-connect)")
     group2.add_argument("-pout", "--pdf-img-out", type=str, default=None,
         help="output dir where pdf extracted images will be saved (required IF --single-pdf is passed)")
-    group2.add_argument("-apkg", "--apkg-out", type=str, default=None,
-        help="output dir where apkg file will be saved")
+    group2.add_argument("-apkg", "--apkg-out", type=str, default=None, nargs='?', const='__default__',
+        help="output dir for .apkg file (defaults to work_dir/outputs if no path given)")
 
     # Config-managed args — still accepted via CLI but hidden from help
     ap.add_argument("-ioid", "--io-model-id", type=bool, default=None, help=argparse.SUPPRESS)
@@ -107,31 +108,76 @@ def main():
     ap.add_argument("-basic", "--basic-type", type=bool, default=False,
         help="whether or not add basic cards")
     ap.add_argument("-c", "--config", type=str, default=None,
-        help="path to config.json (default: ~/.config/niobium/config.json, then bundled default)")
+        help="path to config file (default: ~/.config/niobium/config.yaml, then bundled default)")
     ap.add_argument("--smart", action="store_true", default=False,
-        help="use Claude Vision to intelligently filter OCR results (requires ANTHROPIC_API_KEY)")
-    ap.add_argument("--no-cache", action="store_true", default=False, help=argparse.SUPPRESS)
+        help="use Claude AI for smart filtering or card generation (requires ANTHROPIC_API_KEY)")
+    ap.add_argument("--generate", "-gen", action="store_true", default=False,
+        help="generation-first mode: Claude sees the full image and generates cards from scratch (requires --smart)")
+    ap.add_argument("--page", type=str, default=None,
+        help="page or page range for PDF input, e.g. '5' or '5-10' (requires -pin)")
+    ap.add_argument("--max-cards", type=int, default=None,
+        help="max number of cards to generate per page/image (requires --smart with --page or --generate)")
+    ap.add_argument("--card-type", type=str, default=None, choices=["cloze", "basic", "image_occlusion"],
+        help="force a specific card type (requires --smart with --page or --generate)")
+    ap.add_argument("--no-cache", action="store_true", default=False,
+        help="skip the cache for this run (does not clear existing cache)")
     args = vars(ap.parse_args())
+
+    if args.get('page') and not args.get('single_pdf'):
+        ap.error("--page requires -pin/--single-pdf")
+    if args.get('generate') and not args.get('smart'):
+        ap.error("--generate requires --smart")
+    if args.get('generate') and args.get('single_pdf') and not args.get('page'):
+        ap.error("--generate with -pin requires --page (use --page to select which pages to process)")
+
+    # Resolve default output directory from work_dir when needed
+    needs_default = (
+        (not args.get('deck_name') and not args.get('pdf_img_out') and not args.get('apkg_out'))
+        or args.get('apkg_out') == '__default__'
+    )
+    if needs_default:
+        cfg_path = niobium.resolve_config(args.get("config"))
+        cfg = niobium.load_config(cfg_path)
+        work_dir_cfg = cfg.get("work_dir")
+        if work_dir_cfg:
+            default_out = os.path.join(os.path.expanduser(work_dir_cfg), "outputs")
+            os.makedirs(default_out, exist_ok=True)
+            args['apkg_out'] = default_out
+            console.print(f"[cyan]Output: {default_out}[/cyan]")
+        else:
+            ap.error("No output specified. Use -deck, -apkg PATH, or -pout PATH (or set work_dir in config).")
+        # Pass resolved config path to avoid resolving twice
+        args['config'] = cfg_path
+
     nb = niobium(args)
 
+    if nb.smart:
+        nb.confirm_smart_instructions()
+
+    # Determine if we're in generation-first mode
+    # --generate flag for images, or --smart --page for PDFs (implicit generate)
+    is_generate = nb.generate or (nb.smart and nb.page and args.get('single_pdf'))
+
     if args['pdf_img_out']:
-        """
-        Enable users to use niobium just to extract images from a PDF.
-        """
         if args['single_pdf'] == None:
             raise Exception('--single-pdf must be passed for --pdf-img-out')
-        console.print('[cyan]PDF image export mode.[/cyan]')
-        nb.extract_images_from_pdf(args['single_pdf'],args['pdf_img_out'])
+        import fitz
+        doc = fitz.Document(args['single_pdf'])
+        page_set = niobium.parse_page_range(nb.page, doc.page_count, doc=doc) if nb.page else None
+        doc.close()
+        nb.extract_images_from_pdf(args['single_pdf'],args['pdf_img_out'],pages=page_set)
     elif args['apkg_out']:
-        console.print('[cyan]APKG export mode.[/cyan]')
-        nb.export_apkg()
+        if is_generate:
+            nb.smart_generate_export_apkg()
+        else:
+            nb.export_apkg()
     elif args['basic_type']:
         nb.pdf_to_basic(args['directory'],args['deck_name'])
     else:
-        """
-        Perform optical character recognition for image occlusion (ocr4io).
-        """
-        nb.ocr4io()
+        if is_generate:
+            nb.smart_generate_to_deck()
+        else:
+            nb.ocr4io()
 
 if __name__ == "__main__":
     main()

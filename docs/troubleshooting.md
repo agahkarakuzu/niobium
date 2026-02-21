@@ -34,14 +34,13 @@ title: Troubleshooting
 niobium --directory ./images --deck-name MyDeck --merge-lim-x 20 --merge-lim-y 20
 ```
 
-Or set higher values in `config.json`:
+Or set higher values in your config:
 
-```json
-"merge": {
-    "enabled": true,
-    "limit_x": 20,
-    "limit_y": 20
-}
+```yaml
+merge:
+  enabled: true
+  limit_x: 20
+  limit_y: 20
 ```
 
 ## Smart mode falls back to rule-based filtering

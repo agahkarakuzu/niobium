@@ -1,0 +1,61 @@
+# ── Language & hardware ──────────────────────────────────────────────
+# Comma-separated EasyOCR language codes (e.g. "en", "en,fr")
+langs: en
+
+# GPU device index for EasyOCR (-1 = CPU, 0 = first GPU)
+gpu: -1
+
+# Save quality-control images with OCR bounding boxes drawn on them
+qc: false
+
+# ── OCR box merging ─────────────────────────────────────────────────
+# Merge nearby bounding boxes to reduce fragmented occlusions
+merge:
+  enabled: true
+  # Horizontal/vertical proximity thresholds in pixels
+  limit_x: 10
+  limit_y: 10
+
+# ── Rule-based filtering ────────────────────────────────────────────
+# Text matching these rules is discarded before card creation
+exclude:
+  # Case-insensitive exact matches
+  exact:
+    - Reproductive system
+    - Urinary system
+    - Gastrointestinal system
+    - A
+    - B
+  # Python regex patterns
+  regex:
+    - '(Figure|Fig\.|Fig\:)\s+(\d+[-\w]*).*'
+
+# ── Smart mode (Claude AI) ──────────────────────────────────────────
+llm:
+  # Anthropic API key (falls back to ANTHROPIC_API_KEY env var)
+  api_key: null
+
+  # Claude model to use
+  model: claude-sonnet-4-6
+
+  # Max response tokens for smart filtering (OCR region classification)
+  max_tokens: 1024
+
+  # Max response tokens for page generation (full card content)
+  max_tokens_generate: 4096
+
+  # Response variability (lower = more deterministic)
+  temperature: 0.2
+
+  # Default max cards per page (null = let Claude decide, override with --max-cards)
+  max_cards: null
+
+  # Custom instructions appended to the system prompt
+  # Example: "Only create flashcards from KEY FACT boxes. Ignore body text."
+  instructions: null
+
+# ── Work directory ──────────────────────────────────────────────────
+# Where smart mode saves page renders, markdown extracts, and Claude
+# responses for inspection. A timestamped subdirectory is created per run.
+# Use ~ for home directory. Set to null to disable artifact saving.
+work_dir: ~/niobium_work

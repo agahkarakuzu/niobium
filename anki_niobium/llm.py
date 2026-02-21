@@ -82,6 +82,38 @@ def _get_client(api_key):
     return _client_cache[api_key]
 
 
+# Pricing per million tokens (USD) — updated as of 2025
+_PRICING = {
+    "claude-sonnet-4-6":  {"input": 3.00, "output": 15.00},
+    "claude-opus-4-6":    {"input": 15.00, "output": 75.00},
+    "claude-haiku-4-5":   {"input": 0.80, "output": 4.00},
+}
+_DEFAULT_PRICING = {"input": 3.00, "output": 15.00}
+
+# Running session totals
+_session_totals = {"input_tokens": 0, "output_tokens": 0, "cost": 0.0, "calls": 0}
+
+
+def _log_usage(response, model):
+    """Log token usage and estimated cost from an API response."""
+    usage = response.usage
+    input_tokens = usage.input_tokens
+    output_tokens = usage.output_tokens
+    prices = _PRICING.get(model, _DEFAULT_PRICING)
+    cost = (input_tokens * prices["input"] + output_tokens * prices["output"]) / 1_000_000
+
+    _session_totals["input_tokens"] += input_tokens
+    _session_totals["output_tokens"] += output_tokens
+    _session_totals["cost"] += cost
+    _session_totals["calls"] += 1
+
+    console.print(
+        f"[dim]  tokens: {input_tokens:,} in / {output_tokens:,} out "
+        f"| cost: ${cost:.4f} "
+        f"| session: ${_session_totals['cost']:.4f} ({_session_totals['calls']} calls)[/dim]"
+    )
+
+
 def smart_filter_results(results, image_bytes, config):
     """
     Use Claude Vision to semantically filter OCR results.
@@ -162,6 +194,7 @@ def smart_filter_results(results, image_bytes, config):
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_content}],
             )
+            _log_usage(response, model)
 
             response_text = response.content[0].text
 
@@ -249,3 +282,219 @@ def smart_filter_results(results, image_bytes, config):
     console.print(panel)
 
     return (filtered_results, extra)
+
+
+SMART_GENERATE_PROMPT = """You are helping medical and science students create effective Anki flashcards from a PDF page.
+
+You can SEE the full page. Analyze its content and create the best flashcards possible. You may create multiple cards from a single page.
+
+For each card, choose the most appropriate type:
+
+1. **image_occlusion**: When the page has a diagram, figure, or labeled image where hiding labels/regions and asking the student to recall them is effective. Provide rectangular coordinates (as fractions of page width/height) for regions to occlude.
+
+2. **cloze**: When the page has important factual statements, definitions, or concepts that work well as fill-in-the-blank. Use Anki cloze syntax: {{c1::answer}} for the hidden part. You can have multiple cloze deletions in one card (c1, c2, c3...).
+
+3. **basic**: When the content is best tested as a question/answer pair. Provide a clear question for the front and a concise answer for the back.
+
+RESPONSE FORMAT — respond with ONLY this JSON:
+{
+  "page_summary": "Brief description of what this page covers (1 sentence)",
+  "cards": [
+    {
+      "type": "image_occlusion",
+      "occlusions": [
+        {
+          "left": 0.1234,
+          "top": 0.2345,
+          "width": 0.0500,
+          "height": 0.0300,
+          "label": "What is hidden here"
+        }
+      ],
+      "hint": "Optional context or hint for the back of the card"
+    },
+    {
+      "type": "cloze",
+      "text": "The {{c1::mitochondria}} is the powerhouse of the {{c2::cell}}.",
+      "hint": "Optional extra info for the back"
+    },
+    {
+      "type": "basic",
+      "front": "What enzyme catalyzes the first step of glycolysis?",
+      "back": "Hexokinase",
+      "hint": "Optional extra context"
+    }
+  ]
+}
+
+GUIDELINES:
+- Create cards that are educationally valuable — focus on exam-worthy content
+- For image occlusion: provide coordinates as fractions (0.0 to 1.0) of page width/height
+- For cloze: ensure the sentence reads naturally and tests one concept per cloze
+- For basic: make questions specific and unambiguous
+- Skip page numbers, headers/footers, copyright notices, and other metadata
+- Aim for 1-10 cards per page depending on content density
+- Each card should test ONE concept (atomic cards principle)
+- If the page is mostly a figure/diagram, prefer image_occlusion
+- If the page is mostly text, prefer cloze and basic cards
+- You can mix card types for a single page
+"""
+
+
+def smart_generate_cards(page_index, page_image_bytes, config, max_cards=None, card_type=None, page_text=None, page_label=None):
+    """
+    Use Claude Vision to analyze a full PDF page render and generate cards
+    of multiple types (image_occlusion, cloze, basic).
+
+    When page_text is provided (text-only page), sends text instead of an image
+    to save on API costs. Image occlusion cards are excluded for text-only pages.
+
+    page_label is the user-visible page number (from PDF labels); falls back to
+    page_index + 1 when not provided.
+    """
+    display_page = page_label or str(page_index + 1)
+    text_only = page_image_bytes is None and page_text is not None
+    llm_config = config.get("llm", {})
+
+    api_key = llm_config.get("api_key") or os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        console.print("[bold red]No API key found. --smart --page requires ANTHROPIC_API_KEY.[/bold red]")
+        raise ValueError("API key required for smart page generation")
+
+    model = llm_config.get("model", "claude-sonnet-4-6")
+    max_tokens = llm_config.get("max_tokens_generate", 4096)
+    temperature = llm_config.get("temperature", 0.2)
+
+    instructions = llm_config.get("instructions")
+    if instructions:
+        system_prompt = SMART_GENERATE_PROMPT + f"\nADDITIONAL INSTRUCTIONS FROM USER:\n{instructions}\n"
+    else:
+        system_prompt = SMART_GENERATE_PROMPT
+
+    constraints = []
+    if text_only:
+        constraints.append("This is a TEXT-ONLY page (no images or diagrams). Do NOT generate image_occlusion cards. Only generate 'cloze' and/or 'basic' cards.")
+    if max_cards:
+        constraints.append(f"Generate AT MOST {max_cards} cards for this page.")
+    if card_type:
+        type_label = card_type.replace("_", " ")
+        constraints.append(f"ONLY generate cards of type '{card_type}'. Do not use any other card type.")
+    if constraints:
+        system_prompt += "\nCONSTRAINTS:\n" + "\n".join(f"- {c}" for c in constraints) + "\n"
+
+    if text_only:
+        content_hash = content_hash_bytes(page_text.encode("utf-8"))
+    else:
+        content_hash = content_hash_bytes(page_image_bytes)
+    cache_text_key = f"smart_generate_page_{page_index}_max{max_cards}_type{card_type}_textonly{text_only}"
+    no_cache = config.get("_no_cache", False)
+
+    cached = None
+    if not no_cache:
+        cached = get_cached_claude_response(content_hash, cache_text_key, model, instructions)
+
+    if cached is not None:
+        data = cached
+        from_cache = True
+    else:
+        if text_only:
+            mode_label = "text"
+            user_content = [
+                {
+                    "type": "text",
+                    "text": f"This is the text content of page {display_page} of a PDF. There are no images or diagrams on this page.\n\n---\n{page_text}\n---\n\nAnalyze this text and generate flashcards.",
+                },
+            ]
+        else:
+            mode_label = "image"
+            image_b64 = base64.b64encode(page_image_bytes).decode("utf-8")
+            user_content = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": image_b64,
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": f"This is page {display_page} of a PDF. Analyze it and generate flashcards.",
+                },
+            ]
+
+        try:
+            client = _get_client(api_key)
+            console.print(f"[cyan]Sending page {display_page} ({mode_label}) to Claude ({model}) for card generation...[/cyan]")
+            response = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_content}],
+            )
+            _log_usage(response, model)
+
+            response_text = response.content[0].text
+
+            if "```" in response_text:
+                parts = response_text.split("```")
+                for part in parts[1:]:
+                    cleaned = part.strip()
+                    if cleaned.startswith("json"):
+                        cleaned = cleaned[4:]
+                    cleaned = cleaned.strip()
+                    if cleaned.startswith("{"):
+                        response_text = cleaned
+                        break
+
+            data = json.loads(response_text.strip())
+            set_cached_claude_response(content_hash, cache_text_key, model, instructions, data)
+            from_cache = False
+
+        except Exception as e:
+            console.print(f"[bold red]Claude API error for page {display_page}: {e}[/bold red]")
+            raise
+
+    _display_generated_cards(data, display_page, model, from_cache)
+    return data
+
+
+def _display_generated_cards(data, display_page, model, from_cache):
+    table = Table(show_header=True, header_style="bold", pad_edge=False, box=None)
+    table.add_column("#", width=3)
+    table.add_column("Type", style="cyan", width=16)
+    table.add_column("Content", style="white", no_wrap=False)
+
+    for i, card in enumerate(data.get("cards", []), 1):
+        card_type = card["type"]
+        if card_type == "image_occlusion":
+            n = len(card.get("occlusions", []))
+            content = f"{n} occlusion region(s)"
+        elif card_type == "cloze":
+            content = card.get("text", "")
+        elif card_type == "basic":
+            content = f"Q: {card.get('front', '')}\nA: {card.get('back', '')}"
+        else:
+            content = "unknown type"
+        table.add_row(str(i), card_type, content)
+
+    subtitle_parts = [f"[green]{len(data.get('cards', []))} cards[/green]"]
+    if from_cache:
+        subtitle_parts.append("[dim]cached[/dim]")
+    subtitle = " | ".join(subtitle_parts)
+
+    renderables = []
+    summary = data.get("page_summary", "")
+    if summary:
+        renderables.append(Text.from_markup(f"[italic]{summary}[/italic]\n"))
+    renderables.append(table)
+
+    panel = Panel(
+        Group(*renderables),
+        title=f"[bold]Smart Generate[/bold] — Page {display_page} [dim]({model})[/dim]",
+        subtitle=subtitle,
+        border_style="magenta",
+        padding=(1, 1),
+    )
+    console.print(panel)

@@ -1,10 +1,10 @@
 version: 1
 project:
-  title: Niobium ANKI 
+  title: Niobium ANKI
   subtitle: Putting AI in Anki. For free.
   description: >-
     A CLI tool for creating Anki image occlusion flashcards from images and
-    PDFs using OCR and (optional) Claude Vision smart filtering.
+    PDFs using OCR and (optional) Claude AI smart filtering and card generation.
   authors:
     - name: Agah Karakuzu
       github: agahkarakuzu
@@ -23,19 +23,23 @@ project:
     - file: docs/index.md
     - title: Getting Started
       children:
-        - file: docs/installation.md
-        - file: docs/quickstart.md
-    - title: Usage
+        - file: docs/getting-started/installation.md
+        - file: docs/getting-started/quickstart.md
+    - title: Core (No API Key)
       children:
-        - file: docs/cli-reference.md
-        - file: docs/configuration.md
-        - file: docs/workflows.md
-    - title: Features
+        - file: docs/core/workflows.md
+        - file: docs/core/pdf-processing.md
+        - file: docs/core/apkg-export.md
+    - title: AI Features
       children:
-        - file: docs/smart-filtering.md
-        - file: docs/pdf-processing.md
-        - file: docs/apkg-export.md
-        - file: docs/caching.md
+        - file: docs/ai/overview.md
+        - file: docs/ai/smart-filtering.md
+        - file: docs/ai/smart-generation.md
+    - title: Reference
+      children:
+        - file: docs/reference/cli.md
+        - file: docs/reference/configuration.md
+        - file: docs/reference/caching.md
     - file: docs/troubleshooting.md
     - file: docs/contributing.md
 

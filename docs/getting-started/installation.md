@@ -44,5 +44,5 @@ To push cards directly into a running Anki instance:
 3. Confirm AnkiConnect is active at `http://localhost:8765`.
 
 :::{tip}
-Offline `.apkg` export does not require Anki or AnkiConnect. See [APKG Export](docs/apkg-export.md) for details.
+Offline `.apkg` export does not require Anki or AnkiConnect. See [APKG Export](docs/core/apkg-export.md) for details.
 :::

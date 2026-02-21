@@ -16,12 +16,15 @@ pip install -e .
 
 | Path | Purpose |
 |------|---------|
-| `anki_niobium/cli.py` | CLI entry point:argument parsing, banner display |
-| `anki_niobium/io.py` | Core `niobium` class:OCR, merging, filtering, AnkiConnect, APKG export, PDF extraction |
-| `anki_niobium/llm.py` | Claude Vision integration:`smart_filter_results()` |
+| `anki_niobium/cli.py` | CLI entry point: argument parsing, dispatch, banner display |
+| `anki_niobium/io.py` | Core `niobium` class: OCR, merging, filtering, card delivery, APKG export, PDF processing |
+| `anki_niobium/llm.py` | Claude AI integration: `smart_filter_results()` and `smart_generate_cards()` |
 | `anki_niobium/cache.py` | SQLite cache for processed images and Claude responses |
-| `anki_niobium/default_config.json` | Bundled default configuration |
-| `docs/` | MyST documentation source |
+| `anki_niobium/default_config.yaml` | Bundled default configuration |
+| `docs/getting-started/` | Installation and quickstart guides |
+| `docs/core/` | Non-AI workflows, PDF processing, APKG export |
+| `docs/ai/` | AI features: overview, smart filtering, smart generation |
+| `docs/reference/` | CLI reference, configuration, caching |
 | `myst.yml` | MyST project configuration |
 
 ## Smoke test
