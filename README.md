@@ -77,7 +77,15 @@ Generate your own config file:
 niobium --init-config
 ```
 
-This copies the default template to `~/.config/niobium/config.json`. Niobium will tell you which config file it is using every time it runs.
+This copies the default template to `~/.config/niobium/config.json`. To open it in your editor:
+
+```bash
+niobium --edit-config
+```
+
+This creates the config if it doesn't exist yet, then opens it with `$EDITOR` (falls back to `vi`).
+
+Niobium will tell you which config file it is using every time it runs.
 
 ### Config resolution order
 
@@ -89,6 +97,13 @@ This copies the default template to `~/.config/niobium/config.json`. Niobium wil
 
 ```json
 {
+    "langs": "en",
+    "gpu": -1,
+    "merge": {
+        "enabled": true,
+        "limit_x": 10,
+        "limit_y": 10
+    },
     "exclude": {
         "exact": ["A", "B", "Reproductive system"],
         "regex": ["(Figure|Fig\\.|Fig\\:)\\s+(\\d+[-\\w]*).*"]
@@ -101,9 +116,16 @@ This copies the default template to `~/.config/niobium/config.json`. Niobium wil
 
 | Key | What it does |
 |-----|-------------|
+| `langs` | Comma-separated OCR languages (default: `"en"`). E.g. `"en,fr"` for English and French. |
+| `gpu` | GPU index to use for OCR, or `-1` for CPU only (default: `-1`). |
+| `merge.enabled` | Whether to merge nearby OCR bounding boxes before creating occlusions (default: `true`). |
+| `merge.limit_x` | Horizontal merge threshold in pixels — boxes closer than this are merged (default: `10`). |
+| `merge.limit_y` | Vertical merge threshold in pixels — boxes closer than this are merged (default: `10`). |
 | `exclude.exact` | OCR text matching any of these strings (case-insensitive) is discarded and won't become an occlusion. Useful for filtering out labels like "A", "B", or section headings that appear in images. |
 | `exclude.regex` | OCR text matching any of these regular expressions is discarded. Useful for filtering out figure captions (e.g., "Figure 1", "Fig. 2a"). |
 | `extra` | A list of key-value objects. When OCR detects text matching a key (case-insensitive), the corresponding value is appended to the note's "Back Extra" field as HTML. Useful for adding supplementary information to specific terms. |
+
+CLI flags (`--langs`, `--gpu`, `--merge-rects`, `--merge-lim-x`, `--merge-lim-y`) override the config file values when provided.
 
 ## Examples
 
@@ -133,18 +155,19 @@ niobium --single-pdf /absolute/path/to/lecture.pdf --pdf-img-out /absolute/path/
 Important: `--single-pdf` is required when using `--pdf-img-out`.
 
 
-3) Produce an `.apkg` file (offline export, **NOT TESTED**)
+3) Produce an `.apkg` file (offline export, no AnkiConnect needed)
 
-This processes a directory and writes an `.apkg` bundle suitable for import into Anki without requiring AnkiConnect at runtime.
+This processes a directory and writes an `.apkg` bundle suitable for import into Anki without requiring AnkiConnect at runtime. Uses `genanki` under the hood.
 
 ```bash
 niobium --directory /absolute/path/to/images --apkg-out /absolute/path/to/output_dir
 ```
 
-Optional: include the Image Occlusion model id if you want the built-in model referenced in the package:
+You can also use a single image or a PDF as input:
 
 ```bash
-niobium --directory /absolute/path/to/images --apkg-out /absolute/path/to/output_dir --io-model-id 12345
+niobium --image /absolute/path/to/image.png --apkg-out /absolute/path/to/output_dir
+niobium --single-pdf /absolute/path/to/lecture.pdf --apkg-out /absolute/path/to/output_dir
 ```
 
 4) Create basic (front/back) Anki cards instead of image-occlusion notes

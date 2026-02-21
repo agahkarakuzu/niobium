@@ -33,7 +33,8 @@ dependencies = [
     "PyMuPDF",
     "tqdm",
     "requests",
-    "click",
+    "rich",
+    "genanki",
 ]
 
 [project.urls]

@@ -1,10 +1,17 @@
 import argparse
 import sys
+from rich.console import Console
 from anki_niobium.io import niobium
+
+console = Console()
 
 def main():
     if '--init-config' in sys.argv:
         niobium.init_config()
+        return
+
+    if '--edit-config' in sys.argv:
+        niobium.edit_config()
         return
 
     ap = argparse.ArgumentParser()
@@ -27,16 +34,16 @@ def main():
 
     ap.add_argument("-ioid", "--io-model-id", type=bool, default=None,
         help="ID of the built-in Image Occlusion model in anki (optional, to be used with --apkg-out)")
-    ap.add_argument("-m", "--merge-rects", type=bool, default=True,
-        help="whether or not to merge detected rectangles in close proximity (default True)")
-    ap.add_argument("-mx", "--merge-lim-x", type=int, default=10,
-        help="merges boxes horizontally if the distance is smaller than the specified # pixels (default 10)")
-    ap.add_argument("-my", "--merge-lim-y", type=int, default=10,
-        help="merges boxes vertically if the distance is smaller than the specified # pixels (default 10)")
-    ap.add_argument("-l", "--langs", type=str, default="en",
-        help="comma separated list of languages to OCR (default en)")
-    ap.add_argument("-g", "--gpu", type=int, default=-1,
-        help="whether or not GPU should be used (default -1, no GPU)")
+    ap.add_argument("-m", "--merge-rects", type=bool, default=None,
+        help="whether or not to merge detected rectangles in close proximity (default from config)")
+    ap.add_argument("-mx", "--merge-lim-x", type=int, default=None,
+        help="merges boxes horizontally if the distance is smaller than the specified # pixels (default from config)")
+    ap.add_argument("-my", "--merge-lim-y", type=int, default=None,
+        help="merges boxes vertically if the distance is smaller than the specified # pixels (default from config)")
+    ap.add_argument("-l", "--langs", type=str, default=None,
+        help="comma separated list of languages to OCR (default from config)")
+    ap.add_argument("-g", "--gpu", type=int, default=None,
+        help="whether or not GPU should be used (default from config)")
     ap.add_argument("-hdr", "--add-header", type=bool, default=False,
         help="whether or not to add filename as header.")
     ap.add_argument("-basic", "--basic-type", type=bool, default=False,
@@ -52,8 +59,11 @@ def main():
         """
         if args['single_pdf'] == None:
             raise Exception('--single-pdf must be passed for --pdf-img-out')
-        print('[INFO] --> PDF image export mode.')
+        console.print('[cyan]PDF image export mode.[/cyan]')
         nb.extract_images_from_pdf(args['single_pdf'],args['pdf_img_out'])
+    elif args['apkg_out']:
+        console.print('[cyan]APKG export mode.[/cyan]')
+        nb.export_apkg()
     elif args['basic_type']:
         nb.pdf_to_basic(args['directory'],args['deck_name'])
     else:

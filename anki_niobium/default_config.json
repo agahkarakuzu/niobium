@@ -1,4 +1,11 @@
 {
+    "langs": "en",
+    "gpu": -1,
+    "merge":{
+        "enabled": true,
+        "limit_x": 10,
+        "limit_y": 10
+    },
     "exclude":{
         "exact":[
             "Reproductive system",
