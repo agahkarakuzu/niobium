@@ -1,7 +1,12 @@
 import argparse
+import sys
 from anki_niobium.io import niobium
 
 def main():
+    if '--init-config' in sys.argv:
+        niobium.init_config()
+        return
+
     ap = argparse.ArgumentParser()
     # This group requires an input
     group = ap.add_mutually_exclusive_group(required=True)

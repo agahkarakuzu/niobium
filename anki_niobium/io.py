@@ -41,6 +41,20 @@ class niobium:
         print(f'[INFO] --> Using config: {default_config} (bundled default)')
         return str(default_config)
 
+    @staticmethod
+    def init_config():
+        import shutil
+        dest = Path.home() / ".config" / "niobium" / "config.json"
+        if dest.is_file():
+            print(f'[INFO] --> Config already exists: {dest}')
+            print('[INFO] --> Edit this file to customize filtering rules.')
+            return
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        src = Path(__file__).parent / "default_config.json"
+        shutil.copy2(src, dest)
+        print(f'[INFO] --> Config created: {dest}')
+        print('[INFO] --> Edit this file to customize filtering rules.')
+
     def ocr4io(self):
         """
         Optical Charancter Recognition for Image Occlusion
