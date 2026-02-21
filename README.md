@@ -61,8 +61,49 @@ Other useful flags:
 - `-g, --gpu` — GPU index to use, or `-1` for CPU only (default: -1)
 - `-hdr, --add-header` — add filename as a header (default: False)
 - `-basic, --basic-type` — create basic Anki cards instead of image-occlusion notes (default: False)
+- `-c, --config` — path to a custom config file (see [Configuration](#configuration) below)
 
 Run `niobium -h` to see the help text with the current arguments.
+
+## Configuration
+
+Niobium uses a JSON config file to control how OCR results are filtered before creating Anki notes. Without any configuration, a sensible bundled default is used automatically.
+
+### Getting started
+
+Generate your own config file:
+
+```bash
+niobium --init-config
+```
+
+This copies the default template to `~/.config/niobium/config.json`. Niobium will tell you which config file it is using every time it runs.
+
+### Config resolution order
+
+1. `--config path/to/config.json` — explicit path passed via CLI (highest priority)
+2. `~/.config/niobium/config.json` — user-level config
+3. Bundled default inside the package (lowest priority)
+
+### Config file format
+
+```json
+{
+    "exclude": {
+        "exact": ["A", "B", "Reproductive system"],
+        "regex": ["(Figure|Fig\\.|Fig\\:)\\s+(\\d+[-\\w]*).*"]
+    },
+    "extra": [
+        {"Ductus deferens": "Ductus deferens is a.k.a <span style=\"color:red;\">Vas deferens</span>"}
+    ]
+}
+```
+
+| Key | What it does |
+|-----|-------------|
+| `exclude.exact` | OCR text matching any of these strings (case-insensitive) is discarded and won't become an occlusion. Useful for filtering out labels like "A", "B", or section headings that appear in images. |
+| `exclude.regex` | OCR text matching any of these regular expressions is discarded. Useful for filtering out figure captions (e.g., "Figure 1", "Fig. 2a"). |
+| `extra` | A list of key-value objects. When OCR detects text matching a key (case-insensitive), the corresponding value is appended to the note's "Back Extra" field as HTML. Useful for adding supplementary information to specific terms. |
 
 ## Examples
 
