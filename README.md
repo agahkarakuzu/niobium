@@ -62,6 +62,7 @@ Other useful flags:
 - `-hdr, --add-header` — add filename as a header (default: False)
 - `-basic, --basic-type` — create basic Anki cards instead of image-occlusion notes (default: False)
 - `-c, --config` — path to a custom config file (see [Configuration](#configuration) below)
+- `--smart` — use Claude Vision to intelligently filter OCR results (see [Niobium Smart](#niobium-smart) below)
 
 Run `niobium -h` to see the help text with the current arguments.
 
@@ -110,7 +111,14 @@ Niobium will tell you which config file it is using every time it runs.
     },
     "extra": [
         {"Ductus deferens": "Ductus deferens is a.k.a <span style=\"color:red;\">Vas deferens</span>"}
-    ]
+    ],
+    "llm": {
+        "api_key": null,
+        "model": "claude-sonnet-4-6-20250514",
+        "max_tokens": 1024,
+        "temperature": 0.2,
+        "instructions": null
+    }
 }
 ```
 
@@ -124,6 +132,11 @@ Niobium will tell you which config file it is using every time it runs.
 | `exclude.exact` | OCR text matching any of these strings (case-insensitive) is discarded and won't become an occlusion. Useful for filtering out labels like "A", "B", or section headings that appear in images. |
 | `exclude.regex` | OCR text matching any of these regular expressions is discarded. Useful for filtering out figure captions (e.g., "Figure 1", "Fig. 2a"). |
 | `extra` | A list of key-value objects. When OCR detects text matching a key (case-insensitive), the corresponding value is appended to the note's "Back Extra" field as HTML. Useful for adding supplementary information to specific terms. |
+| `llm.api_key` | Anthropic API key for Smart mode. If `null`, falls back to `ANTHROPIC_API_KEY` env var. See [Niobium Smart](#niobium-smart). |
+| `llm.model` | Claude model to use (default: `claude-sonnet-4-6-20250514`). |
+| `llm.max_tokens` | Maximum response length from Claude (default: `1024`). |
+| `llm.temperature` | Response variability — lower is more consistent (default: `0.2`). |
+| `llm.instructions` | Custom instructions appended to the built-in prompt to steer Smart mode for specific disciplines. |
 
 CLI flags (`--langs`, `--gpu`, `--merge-rects`, `--merge-lim-x`, `--merge-lim-y`) override the config file values when provided.
 
@@ -197,6 +210,132 @@ Pass `--gpu 0` to attempt to use GPU 0. The default `-1` runs on CPU.
 ```bash
 niobium --directory /abs/path/to/images --deck-name MyStudyDeck --gpu 0
 ```
+
+## Niobium Smart
+
+Niobium Smart uses Claude's vision capabilities to intelligently decide what to occlude in your images. Instead of relying on manual exclude rules, Claude analyzes each image and makes semantic decisions about what's worth studying.
+
+### What it does
+
+When you pass the `--smart` flag, the pipeline becomes:
+
+```
+Image → OCR (detects all text + bounding boxes) → Claude Vision (curates results) → Anki card
+```
+
+Claude sees the full image alongside the OCR-detected text and:
+
+- **Decides what to occlude** — key terms, anatomical labels, drug names, disease names, important values
+- **Decides what to skip** — figure labels (A, B, Fig. 1), publisher info, copyright notices, page numbers, OCR noise
+- **Corrects OCR errors** — compares garbled OCR text against what it actually sees in the image (e.g., "Glcmerulus" → "Glomerulus")
+- **Generates study hints** — clinical correlations, functional notes, alternative names, mnemonics — added to the Back Extra field
+- **Describes the image** — a one-line context description appears at the top of Back Extra
+
+OCR still handles precise bounding box coordinates (its strength), Claude handles semantic understanding (its strength).
+
+### Usage
+
+Add `--smart` to any existing niobium command:
+
+```bash
+# Single image
+niobium --image /path/to/anatomy.png --apkg-out ./output --smart
+
+# Directory of images
+niobium --directory /path/to/slides --deck-name Pharmacology --smart
+
+# PDF
+niobium --single-pdf /path/to/lecture.pdf --apkg-out ./output --smart
+```
+
+Without `--smart`, niobium works exactly as before — pure OCR with rule-based filtering.
+
+### API key
+
+Niobium Smart requires an Anthropic API key. You can provide it in two ways:
+
+1. **Environment variable** (recommended for security):
+   ```bash
+   export ANTHROPIC_API_KEY=sk-ant-...
+   ```
+
+2. **Config file** (convenient for personal use):
+   ```json
+   "llm": {
+       "api_key": "sk-ant-..."
+   }
+   ```
+
+Config takes priority over the environment variable. If no key is found, niobium falls back to rule-based filtering with a warning.
+
+### Configuration
+
+The `llm` section in your config file controls Smart mode behavior:
+
+```json
+{
+    "llm": {
+        "api_key": null,
+        "model": "claude-sonnet-4-6-20250514",
+        "max_tokens": 1024,
+        "temperature": 0.2,
+        "instructions": null
+    }
+}
+```
+
+| Key | What it does |
+|-----|-------------|
+| `api_key` | Anthropic API key. If `null`, falls back to `ANTHROPIC_API_KEY` environment variable. |
+| `model` | Claude model to use (default: `claude-sonnet-4-6-20250514`). |
+| `max_tokens` | Maximum response length from Claude (default: `1024`). |
+| `temperature` | Controls response variability. Lower = more consistent, higher = more creative hints (default: `0.2`). |
+| `instructions` | Custom instructions appended to the built-in prompt. This is where you tailor Smart mode to your study goals (see below). |
+
+### Custom instructions
+
+The `instructions` field is the most powerful configuration option. It lets you steer Claude's decisions for a specific study context without replacing the underlying logic. Set it in your config file:
+
+```json
+"instructions": "Focus on pharmacology. Occlude drug names, mechanisms of action, and side effects. Skip anatomical terms unless they are drug targets."
+```
+
+**Examples for different disciplines:**
+
+Pharmacology:
+```json
+"instructions": "I'm studying pharmacology. Prioritize drug names, drug classes, mechanisms of action, receptor types, and side effects. Add hints about drug interactions and clinical indications."
+```
+
+Histology:
+```json
+"instructions": "These are histology slides. Occlude tissue types, cell types, staining characteristics, and structural features. Add hints about how to distinguish similar-looking tissues."
+```
+
+Pathology:
+```json
+"instructions": "Focus on pathological findings. Occlude disease names, morphological descriptions, and diagnostic features. Add hints about epidemiology and clinical presentation."
+```
+
+Step 1/USMLE prep:
+```json
+"instructions": "I'm preparing for USMLE Step 1. Add high-yield clinical correlations and First Aid-style memory aids in the hints."
+```
+
+Text-heavy slides:
+```json
+"instructions": "These images contain mostly text paragraphs. Occlude only the most important medical terms, numerical values, and key facts. Skip filler words and context sentences."
+```
+
+Set `instructions` to `null` (or remove it) to use the default general-purpose behavior.
+
+### Cost
+
+Claude Sonnet processes each image for roughly $0.005–$0.01 depending on image size and number of text regions. A batch of 50 images costs approximately $0.25–$0.50.
+
+### Fallback behavior
+
+If anything goes wrong during a Smart mode run (API error, network timeout, malformed response), niobium automatically falls back to rule-based filtering for that image and continues processing. You always get your cards.
 
 ## Common workflows
 

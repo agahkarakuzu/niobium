@@ -34,6 +34,7 @@ class niobium:
 
         self.langs = self.args.get("langs") if self.args.get("langs") is not None else self.config.get("langs", "en")
         self.gpu = self.args.get("gpu") if self.args.get("gpu") is not None else self.config.get("gpu", -1)
+        self.smart = self.args.get("smart", False)
 
     @staticmethod
     def load_config(config_path):
@@ -96,10 +97,12 @@ class niobium:
 
         if self.args['image'] != None:
             # Single image
-            results, H, W = self.ocr_single_image(self.args["image"], self.langs, self.gpu)
+            results, H, W, image_bytes = self.ocr_single_image(self.args["image"], self.langs, self.gpu)
             if self.merge_enabled:
                 results = self.merge_boxes(results, (self.merge_lim_x, self.merge_lim_y))
-                results, extra = self.filter_results(results, self.config)
+            if self.smart:
+                from anki_niobium.llm import smart_filter_results
+                results, extra = smart_filter_results(results, image_bytes, self.config)
             else:
                 results, extra = self.filter_results(results, self.config)
             occlusion = self.get_occlusion_coords(results, H, W)
@@ -118,10 +121,12 @@ class niobium:
             it = 1
             for img_path in img_list:
                 console.print(f"[dim]\\[{it}/{len(img_list)}][/dim]")
-                results, H, W = self.ocr_single_image(img_path, self.langs, self.gpu)
+                results, H, W, image_bytes = self.ocr_single_image(img_path, self.langs, self.gpu)
                 if self.merge_enabled:
                     results = self.merge_boxes(results, (self.merge_lim_x, self.merge_lim_y))
-                    results, extra = self.filter_results(results, self.config)
+                if self.smart:
+                    from anki_niobium.llm import smart_filter_results
+                    results, extra = smart_filter_results(results, image_bytes, self.config)
                 else:
                     results, extra = self.filter_results(results, self.config)
                 occlusion = self.get_occlusion_coords(results, H, W)
@@ -141,10 +146,12 @@ class niobium:
             it = 1
             for im in all_images:
                 console.print(f"[dim]\\[{it}/{len(all_images)}][/dim]")
-                results, H, W = self.ocr_single_image(None, self.langs, self.gpu, im)
+                results, H, W, image_bytes = self.ocr_single_image(None, self.langs, self.gpu, im)
                 if self.merge_enabled:
                     results = self.merge_boxes(results, (self.merge_lim_x, self.merge_lim_y))
-                    results, extra = self.filter_results(results, self.config)
+                if self.smart:
+                    from anki_niobium.llm import smart_filter_results
+                    results, extra = smart_filter_results(results, image_bytes, self.config)
                 else:
                     results, extra = self.filter_results(results, self.config)
                 occlusion = self.get_occlusion_coords(results, H, W)
@@ -182,10 +189,14 @@ class niobium:
         media_files = []
 
         def process_image(image_name, image_in=None):
-            results, H, W = self.ocr_single_image(image_name, self.langs, self.gpu, image_in)
+            results, H, W, image_bytes = self.ocr_single_image(image_name, self.langs, self.gpu, image_in)
             if self.merge_enabled:
                 results = self.merge_boxes(results, (self.merge_lim_x, self.merge_lim_y))
-            results, extra = self.filter_results(results, self.config)
+            if self.smart:
+                from anki_niobium.llm import smart_filter_results
+                results, extra = smart_filter_results(results, image_bytes, self.config)
+            else:
+                results, extra = self.filter_results(results, self.config)
             if not results:
                 console.print('[yellow]No occlusions found, skipping.[/yellow]')
                 return
@@ -345,7 +356,7 @@ class niobium:
         langs = langs.split(",")
         reader = Reader(langs, gpu=gpu > 0, verbose=False)
         results = reader.readtext(image)
-        return (results, H, W)
+        return (results, H, W, image)
 
     @staticmethod
     def add_image_occlusion_deck(image_name, occlusion, deck_name, extra, image_in,header=False):

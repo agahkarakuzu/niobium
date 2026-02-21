@@ -50,6 +50,8 @@ def main():
         help="whether or not add basic cards")
     ap.add_argument("-c", "--config", type=str, default=None,
         help="path to config.json (default: ~/.config/niobium/config.json, then bundled default)")
+    ap.add_argument("--smart", action="store_true", default=False,
+        help="use Claude Vision to intelligently filter OCR results (requires ANTHROPIC_API_KEY)")
     args = vars(ap.parse_args())
     nb = niobium(args)
 

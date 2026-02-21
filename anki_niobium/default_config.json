@@ -20,5 +20,12 @@
     },
     "extra":[
         {"Ductus deferens": "Ductus deferens is a.k.a <span style=\"color:red;\">Vas deferens</span>"}
-    ]
+    ],
+    "llm":{
+        "api_key": null,
+        "model": "claude-sonnet-4-6-20250514",
+        "max_tokens": 1024,
+        "temperature": 0.2,
+        "instructions": null
+    }
 }
