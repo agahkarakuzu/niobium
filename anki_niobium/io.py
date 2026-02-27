@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw
 from hashlib import blake2b
 import time
 import os
+import sys
 import json
 import yaml
 import re
@@ -21,6 +22,7 @@ import genanki
 import pymupdf4llm
 
 from anki_niobium.cache import content_hash_file, content_hash_bytes, is_processed, mark_processed
+from anki_niobium.theme import S, ansi, set_theme
 
 ANKI_LOCAL = "http://localhost:8765"
 console = Console()
@@ -55,6 +57,7 @@ class niobium:
         self.args = args
         self.config_path = niobium.resolve_config(self.args.get("config"))
         self.config = niobium.load_config(self.config_path)
+        set_theme(self.config.get("theme", "dark"))
 
         merge_cfg = self.config.get("merge", {})
         self.merge_enabled = self.args.get("merge_rects") if self.args.get("merge_rects") is not None else merge_cfg.get("enabled", True)
@@ -188,8 +191,8 @@ class niobium:
         from rich.prompt import Prompt
         console.print(Panel(
             "\n".join(panel_parts),
-            title=f"[bold cyan]{mode}[/bold cyan]",
-            border_style="cyan",
+            title=f"[bold {S.accent}]{mode}[/bold {S.accent}]",
+            border_style=S.accent,
             padding=(1, 2),
         ))
 
@@ -197,93 +200,180 @@ class niobium:
         instructions = self._prompt_instructions(instructions, llm_config)
 
         if not Confirm.ask("Proceed?", default=True):
-            console.print("[yellow]Aborted.[/yellow]")
+            console.print(f"[{S.accent2}]Aborted.[/{S.accent2}]")
             import shutil
             if self.work_dir:
                 shutil.rmtree(self.work_dir, ignore_errors=True)
             raise SystemExit(0)
 
+    @staticmethod
+    def _pick(title, options):
+        """Arrow-key selector. Returns selected index, or -1 on Esc/Ctrl+C.
+
+        Uses raw terminal input (tty/termios) for arrow-key navigation.
+        Falls back to numbered input if terminal is not interactive.
+        """
+        if not options:
+            return -1
+
+        a = ansi()
+        ACCENT = a["accent"]
+        BOLD = a["bold"]
+        DIM = a["dim"]
+        RESET = a["reset"]
+
+        if not sys.stdin.isatty():
+            # Fallback: numbered list
+            sys.stdout.write(f"\n  {BOLD}{title}{RESET}\n")
+            for i, opt in enumerate(options):
+                sys.stdout.write(f"    {i + 1}. {opt}\n")
+            sys.stdout.flush()
+            try:
+                raw = input("  Choice: ").strip()
+                idx = int(raw) - 1
+                return idx if 0 <= idx < len(options) else -1
+            except (ValueError, EOFError, KeyboardInterrupt):
+                return -1
+
+        import tty
+        import termios
+
+        selected = 0
+        n = len(options)
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+
+        def _render_line(i, highlight):
+            sys.stdout.write("\r\033[K")
+            if highlight:
+                sys.stdout.write(f"  {ACCENT}❯{RESET} {BOLD}{options[i]}{RESET}")
+            else:
+                sys.stdout.write(f"    {DIM}{options[i]}{RESET}")
+
+        # Draw initial list
+        sys.stdout.write(f"\n  {BOLD}{title}{RESET}\n")
+        for i in range(n):
+            if i == selected:
+                sys.stdout.write(f"  {ACCENT}❯{RESET} {BOLD}{options[i]}{RESET}\n")
+            else:
+                sys.stdout.write(f"    {DIM}{options[i]}{RESET}\n")
+        sys.stdout.write(f"    {DIM}(↑/↓ arrows, Enter to select, Esc to cancel){RESET}")
+
+        # Move cursor from hint line up to selected option
+        up = n - selected
+        if up > 0:
+            sys.stdout.write(f"\033[{up}A")
+        sys.stdout.flush()
+
+        try:
+            tty.setraw(fd)
+            while True:
+                ch = sys.stdin.read(1)
+                if ch == '\r' or ch == '\n':  # Enter
+                    break
+                if ch == '\x1b':  # Escape sequence
+                    ch2 = sys.stdin.read(1)
+                    if ch2 == '[':
+                        ch3 = sys.stdin.read(1)
+                        if ch3 == 'A':  # Up arrow
+                            if selected > 0:
+                                _render_line(selected, False)
+                                sys.stdout.write("\033[1A")
+                                selected -= 1
+                                _render_line(selected, True)
+                                sys.stdout.flush()
+                        elif ch3 == 'B':  # Down arrow
+                            if selected < n - 1:
+                                _render_line(selected, False)
+                                sys.stdout.write("\033[1B")
+                                selected += 1
+                                _render_line(selected, True)
+                                sys.stdout.flush()
+                    else:
+                        # Bare Esc
+                        selected = -1
+                        break
+                elif ch == '\x03':  # Ctrl+C
+                    selected = -1
+                    break
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+        # Move cursor to after the hint line and clear it
+        if selected >= 0:
+            down = n - selected
+        else:
+            down = n
+        sys.stdout.write(f"\033[{down}B")
+        sys.stdout.write("\r\033[K")  # clear hint line
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+        return selected
+
     def _prompt_instructions(self, instructions, llm_config):
         """Interactive instruction prompt with arrow-key selection."""
-        import questionary
         from rich.panel import Panel
+        from rich.prompt import Prompt
 
         if instructions:
             console.print(Panel(
-                f"[yellow]{instructions}[/yellow]",
-                title="[bold yellow]Instructions[/bold yellow]",
-                subtitle="[dim]from config[/dim]",
-                border_style="yellow",
+                f"[{S.accent2}]{instructions}[/{S.accent2}]",
+                title=f"[bold {S.accent2}]Instructions[/bold {S.accent2}]",
+                subtitle=f"[{S.muted}]from config[/{S.muted}]",
+                border_style=S.accent2,
                 padding=(0, 2),
             ))
-            choice = questionary.select(
-                "Instructions:",
-                choices=[
-                    questionary.Choice("Use this instruction", value="keep"),
-                    questionary.Choice("Enter a new instruction", value="new"),
-                    questionary.Choice("Clear (no instructions)", value="clear"),
-                ],
-            ).ask()
-            if choice is None:  # Ctrl+C
+            idx = niobium._pick("Instructions:", [
+                "Use this instruction",
+                "Enter a new instruction",
+                "Clear (no instructions)",
+            ])
+            if idx < 0:
                 raise SystemExit(0)
-            if choice == "keep":
+            if idx == 0:
                 return instructions
-            if choice == "clear":
+            if idx == 2:
                 llm_config["instructions"] = None
-                save = questionary.select(
-                    "Also remove from config file?",
-                    choices=[
-                        questionary.Choice("No, just this run", value=False),
-                        questionary.Choice("Yes, update config", value=True),
-                    ],
-                ).ask()
-                if save is None:
-                    raise SystemExit(0)
-                if save:
+                save_idx = niobium._pick("Also remove from config file?", [
+                    "No, just this run",
+                    "Yes, update config",
+                ])
+                if save_idx == 1:
                     self._update_config_instructions(None)
                 return None
-            # choice == "new": fall through
+            # idx == 1: fall through to new instruction input
         else:
-            choice = questionary.select(
-                "Instructions:",
-                choices=[
-                    questionary.Choice("No instructions (use defaults)", value="skip"),
-                    questionary.Choice("Enter an instruction", value="new"),
-                ],
-            ).ask()
-            if choice is None:
+            idx = niobium._pick("Instructions:", [
+                "No instructions (use defaults)",
+                "Enter an instruction",
+            ])
+            if idx < 0:
                 raise SystemExit(0)
-            if choice == "skip":
+            if idx == 0:
                 return None
 
         # --- Get new instruction ---
-        new_instr = questionary.text("Instruction:").ask()
-        if new_instr is None:
-            raise SystemExit(0)
+        new_instr = Prompt.ask(f"[bold {S.accent2}]Instruction[/bold {S.accent2}]")
         if not new_instr.strip():
-            return instructions  # keep whatever was there
+            return instructions
 
         llm_config["instructions"] = new_instr
         console.print(Panel(
-            f"[yellow]{new_instr}[/yellow]",
-            title="[bold yellow]Instructions[/bold yellow]",
-            subtitle="[dim]this run[/dim]",
-            border_style="yellow",
+            f"[{S.accent2}]{new_instr}[/{S.accent2}]",
+            title=f"[bold {S.accent2}]Instructions[/bold {S.accent2}]",
+            subtitle=f"[{S.muted}]this run[/{S.muted}]",
+            border_style=S.accent2,
             padding=(0, 2),
         ))
-        save = questionary.select(
-            "Save to config for future runs?",
-            choices=[
-                questionary.Choice("No, one-time only", value=False),
-                questionary.Choice("Yes, update config", value=True),
-            ],
-        ).ask()
-        if save is None:
-            raise SystemExit(0)
-        if save:
+        save_idx = niobium._pick("Save to config for future runs?", [
+            "No, one-time only",
+            "Yes, update config",
+        ])
+        if save_idx == 1:
             self._update_config_instructions(new_instr)
         else:
-            console.print("[dim]One-time instruction (config unchanged).[/dim]")
+            console.print(f"[{S.muted}]One-time instruction (config unchanged).[/{S.muted}]")
         return new_instr
 
     def _update_config_instructions(self, new_value):
@@ -291,7 +381,7 @@ class niobium:
         cfg_path = self.config_path
         bundled = str(Path(__file__).parent / "default_config.yaml")
         if cfg_path == bundled:
-            console.print("[yellow]Cannot write to bundled default config. Run --init-config first.[/yellow]")
+            console.print(f"[{S.accent2}]Cannot write to bundled default config. Run --init-config first.[/{S.accent2}]")
             return
         try:
             with open(cfg_path) as f:
@@ -313,23 +403,23 @@ class niobium:
                 )
             with open(cfg_path, 'w') as f:
                 f.write(raw)
-            console.print(f"[green]Config updated: {cfg_path}[/green]")
+            console.print(f"[{S.success}]Config updated: {cfg_path}[/{S.success}]")
         except Exception as e:
-            console.print(f"[red]Failed to update config: {e}[/red]")
+            console.print(f"[{S.error}]Failed to update config: {e}[/{S.error}]")
 
     @staticmethod
     def _show_cache_hit(label, cached_info):
         """Display a panel with previously saved output/artifact paths."""
         from rich.panel import Panel
-        parts = [f"[dim]{label} was already processed[/dim]"]
+        parts = [f"[{S.muted}]{label} was already processed[/{S.muted}]"]
         if cached_info.get("output_path"):
             parts.append(f"[bold]Output:[/bold] {cached_info['output_path']}")
         if cached_info.get("artifacts_path"):
             parts.append(f"[bold]Artifacts:[/bold] {cached_info['artifacts_path']}")
         console.print(Panel(
             "\n".join(parts),
-            title="[dim]Cache hit[/dim]",
-            border_style="dim",
+            title=f"[{S.muted}]Cache hit[/{S.muted}]",
+            border_style=S.muted,
             padding=(0, 2),
         ))
 
@@ -364,7 +454,7 @@ class niobium:
             p = Path(config_path)
             if not p.is_file():
                 raise FileNotFoundError(f"Config file not found: {config_path}")
-            console.print(f'[cyan]Using config: {p}[/cyan]')
+            console.print(f'[{S.accent}]Using config: {p}[/{S.accent}]')
             return str(p)
 
         # Check user config: YAML first, then legacy JSON
@@ -372,11 +462,11 @@ class niobium:
         for name in ("config.yaml", "config.yml", "config.json"):
             user_config = config_dir / name
             if user_config.is_file():
-                console.print(f'[cyan]Using config: {user_config}[/cyan]')
+                console.print(f'[{S.accent}]Using config: {user_config}[/{S.accent}]')
                 return str(user_config)
 
         default_config = Path(__file__).parent / "default_config.yaml"
-        console.print(f'[cyan]Using config: {default_config} (bundled default)[/cyan]')
+        console.print(f'[{S.accent}]Using config: {default_config} (bundled default)[/{S.accent}]')
         return str(default_config)
 
     @staticmethod
@@ -387,15 +477,15 @@ class niobium:
         for name in ("config.yaml", "config.yml", "config.json"):
             existing = config_dir / name
             if existing.is_file():
-                console.print(f'[cyan]Config already exists: {existing}[/cyan]')
-                console.print('[cyan]Edit this file to customize filtering rules.[/cyan]')
+                console.print(f'[{S.accent}]Config already exists: {existing}[/{S.accent}]')
+                console.print(f'[{S.accent}]Edit this file to customize filtering rules.[/{S.accent}]')
                 return existing
         config_dir.mkdir(parents=True, exist_ok=True)
         dest = config_dir / "config.yaml"
         src = Path(__file__).parent / "default_config.yaml"
         shutil.copy2(src, dest)
-        console.print(f'[bold green]Config created: {dest}[/bold green]')
-        console.print('[cyan]Edit this file to customize filtering rules.[/cyan]')
+        console.print(f'[bold {S.success}]Config created: {dest}[/bold {S.success}]')
+        console.print(f'[{S.accent}]Edit this file to customize filtering rules.[/{S.accent}]')
         return dest
 
     @staticmethod
@@ -411,7 +501,7 @@ class niobium:
         """
         #print(self)
         if self.deck_exists(self.args["deck_name"]):
-            console.print(f'[cyan]Found Anki deck named {self.args["deck_name"]}[/cyan]')
+            console.print(f'[{S.accent}]Found Anki deck named {self.args["deck_name"]}[/{S.accent}]')
         else:
             if Confirm.ask(f'Deck [bold]{self.args["deck_name"]}[/bold] not found. Create?', default=True):
                 self.create_deck(self.args["deck_name"])
@@ -440,20 +530,20 @@ class niobium:
                 self.save_qc_image(results, self.args["image"], path=opdir, image_in=None)
         elif self.args['directory'] != None:
             # Batch process
-            console.print(f"[cyan]Starting batch processing {self.args['directory']}[/cyan]")
+            console.print(f"[{S.accent}]Starting batch processing {self.args['directory']}[/{S.accent}]")
             opdir = os.path.join(self.args['directory'], 'niobium-io')
-            console.print(f"[dim]{opdir}[/dim]")
+            console.print(f"[{S.muted}]{opdir}[/{S.muted}]")
             if not os.path.exists(opdir):
                 os.makedirs(opdir)
             img_list = self.get_images_in_directory(self.args['directory'])
-            console.print(f"[cyan]{len(img_list)} images found[/cyan]")
+            console.print(f"[{S.accent}]{len(img_list)} images found[/{S.accent}]")
             it = 1
             skipped = 0
             for img_path in img_list:
-                console.print(f"[dim]\\[{it}/{len(img_list)}][/dim]")
+                console.print(f"[{S.muted}]\\[{it}/{len(img_list)}][/{S.muted}]")
                 c_hash = content_hash_file(img_path)
                 if not self.no_cache and is_processed(c_hash):
-                    console.print(f"[dim]Skipping {os.path.basename(img_path)} (already processed)[/dim]")
+                    console.print(f"[{S.muted}]Skipping {os.path.basename(img_path)} (already processed)[/{S.muted}]")
                     skipped += 1
                     it += 1
                     continue
@@ -473,27 +563,27 @@ class niobium:
                     self.save_qc_image(results, img_path, path=opdir, image_in=None)
                 it += 1
             if skipped:
-                console.print(f"[dim]{skipped} image(s) skipped (already in cache)[/dim]")
+                console.print(f"[{S.muted}]{skipped} image(s) skipped (already in cache)[/{S.muted}]")
         elif self.args['single_pdf'] != None:
-            console.print("[cyan]Extracting images from the PDF[/cyan]")
+            console.print(f"[{S.accent}]Extracting images from the PDF[/{S.accent}]")
             opdir = os.path.dirname(os.path.abspath(self.args['single_pdf']))
             opdir = os.path.join(opdir, 'niobium-io')
             if not os.path.exists(opdir):
                 os.makedirs(opdir)
-            console.print(f"[cyan]Preview images will be saved at {opdir}[/cyan]")
+            console.print(f"[{S.accent}]Preview images will be saved at {opdir}[/{S.accent}]")
             doc = fitz.Document(self.args['single_pdf'])
             page_set = niobium.parse_page_range(self.page, doc.page_count, doc=doc) if self.page else None
             doc.close()
             all_images = self.extract_images_from_pdf(self.args['single_pdf'], pages=page_set)
-            console.print(f"[cyan]{len(all_images)} images were extracted from the PDF.[/cyan]")
+            console.print(f"[{S.accent}]{len(all_images)} images were extracted from the PDF.[/{S.accent}]")
             it = 1
             skipped = 0
             for im in all_images:
-                console.print(f"[dim]\\[{it}/{len(all_images)}][/dim]")
+                console.print(f"[{S.muted}]\\[{it}/{len(all_images)}][/{S.muted}]")
                 im_bytes = niobium.byte_convert(im)
                 c_hash = content_hash_bytes(im_bytes)
                 if not self.no_cache and is_processed(c_hash):
-                    console.print(f"[dim]Skipping PDF image {it} (already processed)[/dim]")
+                    console.print(f"[{S.muted}]Skipping PDF image {it} (already processed)[/{S.muted}]")
                     skipped += 1
                     it += 1
                     continue
@@ -513,7 +603,7 @@ class niobium:
                     self.save_qc_image(results, None, path=opdir, image_in=im)
                 it += 1
             if skipped:
-                console.print(f"[dim]{skipped} image(s) skipped (already in cache)[/dim]")
+                console.print(f"[{S.muted}]{skipped} image(s) skipped (already in cache)[/{S.muted}]")
 
     @staticmethod
     def _validate_and_fix_card(card, has_image):
@@ -596,9 +686,9 @@ class niobium:
         for i, card in enumerate(cards, 1):
             valid, reason, fixes = niobium._validate_and_fix_card(card, has_image)
             if fixes:
-                console.print(f"[cyan]  Card {i} auto-fixed: {'; '.join(fixes)}[/cyan]")
+                console.print(f"[{S.accent}]  Card {i} auto-fixed: {'; '.join(fixes)}[/{S.accent}]")
             if not valid:
-                console.print(f"[yellow]  Skipping card {i}: {reason}[/yellow]")
+                console.print(f"[{S.accent2}]  Skipping card {i}: {reason}[/{S.accent2}]")
                 skipped += 1
                 continue
 
@@ -683,7 +773,7 @@ class niobium:
                 created += 1
 
         if skipped:
-            console.print(f"[yellow]  {skipped} card(s) skipped due to validation errors[/yellow]")
+            console.print(f"[{S.accent2}]  {skipped} card(s) skipped due to validation errors[/{S.accent2}]")
         return created
 
     def _collect_generate_items(self):
@@ -704,7 +794,7 @@ class niobium:
             rendered_pages = niobium.render_pdf_pages(pdf_path, pages=page_set)
             n_img = sum(1 for _, img, _, _ in rendered_pages if img is not None)
             n_txt = len(rendered_pages) - n_img
-            console.print(f"[cyan]{len(rendered_pages)} page(s) analyzed ({n_img} with images, {n_txt} text-only).[/cyan]")
+            console.print(f"[{S.accent}]{len(rendered_pages)} page(s) analyzed ({n_img} with images, {n_txt} text-only).[/{S.accent}]")
 
             for page_idx, page_img, page_text, page_label in rendered_pages:
                 label = f"Page {page_label}"
@@ -724,7 +814,7 @@ class niobium:
 
         elif self.args.get('directory'):
             img_list = self.get_images_in_directory(self.args['directory'])
-            console.print(f"[cyan]{len(img_list)} images found.[/cyan]")
+            console.print(f"[{S.accent}]{len(img_list)} images found.[/{S.accent}]")
             for idx, img_path in enumerate(img_list):
                 img = Image.open(img_path)
                 label = os.path.basename(img_path)
@@ -737,7 +827,7 @@ class niobium:
         """Smart generation pipeline → push to Anki via AnkiConnect."""
         deck_name = self.args["deck_name"]
         if self.deck_exists(deck_name):
-            console.print(f'[cyan]Found Anki deck named {deck_name}[/cyan]')
+            console.print(f'[{S.accent}]Found Anki deck named {deck_name}[/{S.accent}]')
         else:
             if Confirm.ask(f'Deck [bold]{deck_name}[/bold] not found. Create?', default=True):
                 self.create_deck(deck_name)
@@ -750,7 +840,7 @@ class niobium:
         total_cards = 0
         skipped = 0
         for label, idx, display_name, img, text, c_hash, source in items:
-            console.print(f"[dim]\\[{label}][/dim]")
+            console.print(f"[{S.muted}]\\[{label}][/{S.muted}]")
             self.save_work_artifact(idx, page_img=img, page_text=text, display_name=display_name)
 
             if not self.no_cache:
@@ -772,10 +862,10 @@ class niobium:
             mark_processed(c_hash, source, output_path=f"deck:{deck_name}", artifacts_path=self.work_dir)
 
         if skipped:
-            console.print(f"[dim]{skipped} item(s) skipped (already in cache)[/dim]")
-        console.print(f"[bold green]{total_cards} cards created from {len(items)} item(s).[/bold green]")
+            console.print(f"[{S.muted}]{skipped} item(s) skipped (already in cache)[/{S.muted}]")
+        console.print(f"[bold {S.success}]{total_cards} cards created from {len(items)} item(s).[/bold {S.success}]")
         if self.work_dir:
-            console.print(f"[cyan]Artifacts: {self.work_dir}[/cyan]")
+            console.print(f"[{S.accent}]Artifacts: {self.work_dir}[/{S.accent}]")
 
     def smart_generate_export_apkg(self):
         """Smart generation pipeline → export .apkg file."""
@@ -794,7 +884,7 @@ class niobium:
         total_cards = 0
         skipped = 0
         for label, idx, display_name, img, text, c_hash, source in items:
-            console.print(f"[dim]\\[{label}][/dim]")
+            console.print(f"[{S.muted}]\\[{label}][/{S.muted}]")
             self.save_work_artifact(idx, page_img=img, page_text=text, display_name=display_name)
 
             if not self.no_cache:
@@ -829,10 +919,10 @@ class niobium:
             mark_processed(c_hash, source, output_path=apkg_path, artifacts_path=self.work_dir)
 
         if skipped:
-            console.print(f"[dim]{skipped} item(s) skipped (already in cache)[/dim]")
-        console.print(f'[bold green]Saved {apkg_path} ({len(deck.notes)} notes, {total_cards} cards)[/bold green]')
+            console.print(f"[{S.muted}]{skipped} item(s) skipped (already in cache)[/{S.muted}]")
+        console.print(f'[bold {S.success}]Saved {apkg_path} ({len(deck.notes)} notes, {total_cards} cards)[/bold {S.success}]')
         if self.work_dir:
-            console.print(f"[cyan]Artifacts: {self.work_dir}[/cyan]")
+            console.print(f"[{S.accent}]Artifacts: {self.work_dir}[/{S.accent}]")
 
     def export_apkg(self):
         """
@@ -869,7 +959,7 @@ class niobium:
             else:
                 c_hash = content_hash_bytes(niobium.byte_convert(image_in))
             if is_batch and not self.no_cache and is_processed(c_hash):
-                console.print(f'[dim]Skipping (already processed)[/dim]')
+                console.print(f'[{S.muted}]Skipping (already processed)[/{S.muted}]')
                 return True  # skipped
 
             results, H, W, image_bytes = self.ocr_single_image(image_name, self.langs, self.gpu, image_in)
@@ -881,7 +971,7 @@ class niobium:
             else:
                 results, extra = self.filter_results(results, self.config)
             if not results:
-                console.print('[yellow]No occlusions found, skipping.[/yellow]')
+                console.print(f'[{S.accent2}]No occlusions found, skipping.[/{S.accent2}]')
                 return False
             occlusion = self.get_occlusion_coords(results, H, W)
 
@@ -905,7 +995,7 @@ class niobium:
                 tags=['NIOBIUM'],
             )
             deck.add_note(note)
-            console.print(f'[green]Note created with {len(results)} occlusions.[/green]')
+            console.print(f'[{S.success}]Note created with {len(results)} occlusions.[/{S.success}]')
             mark_processed(c_hash, image_name or f"pdf:{os.path.basename(self.args.get('single_pdf', 'unknown'))}")
             return False
 
@@ -918,27 +1008,27 @@ class niobium:
             process_image(self.args['image'])
         elif self.args.get('directory'):
             img_list = self.get_images_in_directory(self.args['directory'])
-            console.print(f'[cyan]{len(img_list)} images found.[/cyan]')
+            console.print(f'[{S.accent}]{len(img_list)} images found.[/{S.accent}]')
             skipped = 0
             for i, img_path in enumerate(img_list, 1):
-                console.print(f'[dim]\\[{i}/{len(img_list)}][/dim]')
+                console.print(f'[{S.muted}]\\[{i}/{len(img_list)}][/{S.muted}]')
                 if process_image(img_path, is_batch=True):
                     skipped += 1
             if skipped:
-                console.print(f"[dim]{skipped} image(s) skipped (already in cache)[/dim]")
+                console.print(f"[{S.muted}]{skipped} image(s) skipped (already in cache)[/{S.muted}]")
         elif self.args.get('single_pdf'):
             doc = fitz.Document(self.args['single_pdf'])
             page_set = niobium.parse_page_range(self.page, doc.page_count, doc=doc) if self.page else None
             doc.close()
             all_images = self.extract_images_from_pdf(self.args['single_pdf'], pages=page_set)
-            console.print(f'[cyan]{len(all_images)} images extracted from PDF.[/cyan]')
+            console.print(f'[{S.accent}]{len(all_images)} images extracted from PDF.[/{S.accent}]')
             skipped = 0
             for i, im in enumerate(all_images, 1):
-                console.print(f'[dim]\\[{i}/{len(all_images)}][/dim]')
+                console.print(f'[{S.muted}]\\[{i}/{len(all_images)}][/{S.muted}]')
                 if process_image(None, image_in=im, is_batch=True):
                     skipped += 1
             if skipped:
-                console.print(f"[dim]{skipped} image(s) skipped (already in cache)[/dim]")
+                console.print(f"[{S.muted}]{skipped} image(s) skipped (already in cache)[/{S.muted}]")
 
         apkg_path = os.path.join(out_dir, f'{self._derive_output_stem()}.apkg')
         pkg = genanki.Package(deck)
@@ -946,7 +1036,7 @@ class niobium:
         pkg.write_to_file(apkg_path)
         import shutil
         shutil.rmtree(tmp_media_dir)
-        console.print(f'[bold green]Saved {apkg_path} ({len(deck.notes)} notes)[/bold green]')
+        console.print(f'[bold {S.success}]Saved {apkg_path} ({len(deck.notes)} notes)[/bold {S.success}]')
 
     @staticmethod
     def reverse_word_order(string):
@@ -980,7 +1070,7 @@ class niobium:
                         cur_exact_flag = True
                         break
             if cur_exact_flag or cur_reg_flag:
-                console.print(f'[dim]Discarding occlusion with text {text}[/dim]')
+                console.print(f'[{S.muted}]Discarding occlusion with text {text}[/{S.muted}]')
             else:
                 filtered_results.append((bbox, text, prob))
 
@@ -1065,12 +1155,12 @@ class niobium:
             image = Image.open(image_name)
             W, H = image.size
             image = niobium.byte_convert(image)
-            console.print(f"[cyan]Running OCR for {image_name}[/cyan]")
+            console.print(f"[{S.accent}]Running OCR for {image_name}[/{S.accent}]")
         else:
             image = image_in
             W, H = image.size
             image = niobium.byte_convert(image)
-            console.print("[cyan]Running OCR for PDF image[/cyan]")
+            console.print(f"[{S.accent}]Running OCR for PDF image[/{S.accent}]")
         langs = langs.split(",")
         reader = Reader(langs, gpu=gpu > 0, verbose=False)
         results = reader.readtext(image)
@@ -1124,12 +1214,12 @@ class niobium:
         if response.status_code == 200:
             data = json.loads(response.content)
             if data['error']:
-                return (True, f"[bold red]Could not add note: {data['error']}[/bold red]")
+                return (True, f"[{S.error}]Could not add note: {data['error']}[/{S.error}]")
             else:
-                return (True, f"[green]Note added: {data['result']}[/green]")
+                return (True, f"[{S.success}]Note added: {data['result']}[/{S.success}]")
         else:
             data = json.loads(response.content)
-            return (False, f"[bold red]Could not create note for {image_name}: {data}[/bold red]")
+            return (False, f"[{S.error}]Could not create note for {image_name}: {data}[/{S.error}]")
 
     @staticmethod
     def add_cloze_note(text, deck_name, hint=""):
@@ -1153,12 +1243,12 @@ class niobium:
         if response.status_code == 200:
             data = json.loads(response.content)
             if data['error']:
-                return (True, f"[bold red]Could not add cloze note: {data['error']}[/bold red]")
+                return (True, f"[{S.error}]Could not add cloze note: {data['error']}[/{S.error}]")
             else:
-                return (True, f"[green]Cloze note added: {data['result']}[/green]")
+                return (True, f"[{S.success}]Cloze note added: {data['result']}[/{S.success}]")
         else:
             data = json.loads(response.content)
-            return (False, f"[bold red]Could not create cloze note: {data}[/bold red]")
+            return (False, f"[{S.error}]Could not create cloze note: {data}[/{S.error}]")
 
     @staticmethod
     def add_basic_note(front, back, deck_name):
@@ -1182,12 +1272,12 @@ class niobium:
         if response.status_code == 200:
             data = json.loads(response.content)
             if data['error']:
-                return (True, f"[bold red]Could not add basic note: {data['error']}[/bold red]")
+                return (True, f"[{S.error}]Could not add basic note: {data['error']}[/{S.error}]")
             else:
-                return (True, f"[green]Basic note added: {data['result']}[/green]")
+                return (True, f"[{S.success}]Basic note added: {data['result']}[/{S.success}]")
         else:
             data = json.loads(response.content)
-            return (False, f"[bold red]Could not create basic note: {data}[/bold red]")
+            return (False, f"[{S.error}]Could not create basic note: {data}[/{S.error}]")
 
     @staticmethod
     def cleanup_text(text):
@@ -1212,7 +1302,7 @@ class niobium:
 
     @staticmethod
     def merge_boxes(results, threshold=(20, 20)):
-        console.print(f'[cyan]{len(results)} occlusion pairs.[/cyan]')
+        console.print(f'[{S.accent}]{len(results)} occlusion pairs.[/{S.accent}]')
         merged_results = []
         if len(results) == 0:
             return merged_results
@@ -1336,25 +1426,25 @@ class niobium:
             # Build a concise summary for the terminal
             parts = []
             for img in meaningful:
-                parts.append(f"[green]{img['kind']}[/green] {img['width']:.0f}x{img['height']:.0f}pt")
+                parts.append(f"[{S.success}]{img['kind']}[/{S.success}] {img['width']:.0f}x{img['height']:.0f}pt")
             for img in decorative:
-                parts.append(f"[dim]{img['kind']} {img['width']:.0f}x{img['height']:.0f}pt[/dim]")
+                parts.append(f"[{S.muted}]{img['kind']} {img['width']:.0f}x{img['height']:.0f}pt[/{S.muted}]")
             img_summary = ", ".join(parts) if parts else "no images"
             if meaningful:
                 pix = page.get_pixmap(matrix=mat)
                 img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
                 rendered.append((i, img, md, page_label))
-                console.print(f"  [cyan]Page {page_label}:[/cyan] {img_summary} → [bold]image + text[/bold]")
+                console.print(f"  [{S.accent}]Page {page_label}:[/{S.accent}] {img_summary} → [bold]image + text[/bold]")
             else:
                 rendered.append((i, None, md, page_label))
-                console.print(f"  [cyan]Page {page_label}:[/cyan] {img_summary} → [bold]text[/bold]")
+                console.print(f"  [{S.accent}]Page {page_label}:[/{S.accent}] {img_summary} → [bold]text[/bold]")
         return rendered
 
     @staticmethod
     def extract_images_from_pdf(file,path=None,pages=None):
         if path:
             ct = datetime.now()
-            console.print(f'[cyan]Images will be extracted from {file}[/cyan]')
+            console.print(f'[{S.accent}]Images will be extracted from {file}[/{S.accent}]')
             opdir = os.path.join(path,'niobium-pdf2img',os.path.basename(file).split('.')[0] + ct.strftime("_%H-%M-%S"))
             if not os.path.exists(opdir):
                 os.makedirs(opdir)
@@ -1367,7 +1457,7 @@ class niobium:
         all_images = []
         doc = fitz.Document(file)
         page_indices = sorted(pages) if pages else range(len(doc))
-        console.print(f'[cyan]Extracted images will be saved to {opdir}[/cyan]')
+        console.print(f'[{S.accent}]Extracted images will be saved to {opdir}[/{S.accent}]')
         count = 1
         for i in tqdm(page_indices, desc="pages"):
             for img in tqdm(doc.get_page_images(i), desc="page_images"):
@@ -1387,7 +1477,7 @@ class niobium:
         if path == None:
             return all_images
         else:
-            console.print(f'[bold green]{count-1} images have been saved.[/bold green]')
+            console.print(f'[bold {S.success}]{count-1} images have been saved.[/bold {S.success}]')
 
     @staticmethod
     def create_deck(deck_name):
@@ -1403,7 +1493,7 @@ class niobium:
             if data['error']:
                 raise Exception(f'Cannot create deck: {data["error"]}')
             else:
-                console.print(f"[green]Created deck {deck_name}: {data['result']}[/green]")
+                console.print(f"[{S.success}]Created deck {deck_name}: {data['result']}[/{S.success}]")
         else:
             raise Exception('Cannot connect to Anki')
 
@@ -1500,26 +1590,26 @@ class niobium:
         if response.status_code == 200:
             data = json.loads(response.content)
             if data['error']:
-                return (True, f"[bold red]Could not add note: {data['error']}[/bold red]")
+                return (True, f"[{S.error}]Could not add note: {data['error']}[/{S.error}]")
             else:
-                return (True, f"[green]Note added: {data['result']}[/green]")
+                return (True, f"[{S.success}]Note added: {data['result']}[/{S.success}]")
         else:
             data = json.loads(response.content)
-            return (False, f"[bold red]Could not create note for {image_name}: {data}[/bold red]")
+            return (False, f"[{S.error}]Could not create note for {image_name}: {data}[/{S.error}]")
 
     @staticmethod
     def pdf_to_basic(directory,deck_name):
         if niobium.deck_exists(deck_name):
-            console.print(f'[cyan]Found Anki deck named {deck_name}[/cyan]')
+            console.print(f'[{S.accent}]Found Anki deck named {deck_name}[/{S.accent}]')
         else:
             if Confirm.ask(f'Deck [bold]{deck_name}[/bold] not found. Create?', default=True):
                 niobium.create_deck(deck_name)
             else:
                 raise Exception('Cannot create notes without a deck. Terminating ...')
         img_list = niobium.get_images_in_directory(directory)
-        console.print(f"[cyan]{len(img_list)} images found[/cyan]")
+        console.print(f"[{S.accent}]{len(img_list)} images found[/{S.accent}]")
         it = 1
         for img_path in sorted(img_list):
-            console.print(f"[dim]\\[{it}/{len(img_list)}][/dim]")
+            console.print(f"[{S.muted}]\\[{it}/{len(img_list)}][/{S.muted}]")
             niobium.add_basic_deck(img_path, deck_name)
             it += 1

@@ -8,10 +8,34 @@ from rich.text import Text
 from rich import box
 from rich_argparse import RichHelpFormatter
 from anki_niobium.io import niobium
+from anki_niobium.theme import S, set_theme
 
 console = Console()
 
-BANNER = r"""
+
+def _load_theme_early():
+    """Load just the theme setting from config before full init."""
+    from pathlib import Path
+    import yaml
+    for cfg in [
+        Path.home() / ".config" / "niobium" / "config.yaml",
+        Path.home() / ".config" / "niobium" / "config.yml",
+        Path(__file__).parent / "default_config.yaml",
+    ]:
+        if cfg.is_file():
+            try:
+                with open(cfg) as f:
+                    data = yaml.safe_load(f)
+                if data and data.get("theme"):
+                    set_theme(data["theme"])
+            except Exception:
+                pass
+            break
+
+_load_theme_early()
+
+
+_BANNER_TEMPLATE = r"""
 [#5FBAE6]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣤⣦⣤ [/#5FBAE6]
 [#5FBAE6]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣰⣿⣿⣿⣧[/#5FBAE6]
 [#5FBAE6]⠀⠀⠀⠀⠀⠀⠀⠀⠀⣰⣿⠃⠀⠙⣿⣧[/#5FBAE6]
@@ -23,22 +47,27 @@ BANNER = r"""
 [#5FBAE6]⠀⠀⠀⠀⠀⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢼⣿[/#5FBAE6]  [bold bright_cyan] ╔╗╔[/bold bright_cyan] [bold bright_cyan]╦[/bold bright_cyan] [bold bright_cyan]╔═╗[/bold bright_cyan] [bold bright_cyan]╔╗ [/bold bright_cyan] [bold bright_cyan]╦[/bold bright_cyan] [bold bright_cyan]╦ ╦[/bold bright_cyan] [bold bright_cyan]╔╦╗[/bold bright_cyan] [bold sky_blue3]╔═╗╦[/bold sky_blue3]
 [#5FBAE6]⠀⠀⠀⠀⠀⣿⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿[/#5FBAE6]  [bold bright_cyan] ║║║[/bold bright_cyan] [bold bright_cyan]║[/bold bright_cyan] [bold bright_cyan]║ ║[/bold bright_cyan] [bold bright_cyan]╠╩╗[/bold bright_cyan] [bold bright_cyan]║[/bold bright_cyan] [bold bright_cyan]║ ║[/bold bright_cyan] [bold bright_cyan]║║║[/bold bright_cyan] [bold sky_blue3]╠═╣║[/bold sky_blue3]
 [#5FBAE6]⠀⠀⠀⠀⢸⣿⠁⠀⠀⣄⣤⣴⣶⣦⣤⣀⠀⠀⠸⣿⡆[/#5FBAE6] [bold bright_cyan] ╝╚╝[/bold bright_cyan] [bold bright_cyan]╩[/bold bright_cyan] [bold bright_cyan]╚═╝[/bold bright_cyan] [bold bright_cyan]╚═╝[/bold bright_cyan] [bold bright_cyan]╩[/bold bright_cyan] [bold bright_cyan]╚═╝[/bold bright_cyan] [bold bright_cyan]╩ ╩[/bold bright_cyan] [bold sky_blue3]╩ ╩╩[/bold sky_blue3]
-[#5FBAE6]⠀⠀⠀⠀⢸⣿⣤⣴⣾⠿⠛⠉⠀⠉⠛⠿⣷⣶⣤⣿⣷[/#5FBAE6] [white bold] Putting AI in Anki. For free.  [/white bold]
-[#5FBAE6]⠀⠀⠀⠀⠘⠛⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠛⠛⠃[/#5FBAE6] [dim light_steel_blue1 italic] Because making 200 flashcards[/dim light_steel_blue1 italic]
-                      [dim light_steel_blue1 italic] by hand is not high-yield.[/dim light_steel_blue1 italic]
-[dim green][/dim green]
+[#5FBAE6]⠀⠀⠀⠀⢸⣿⣤⣴⣾⠿⠛⠉⠀⠉⠛⠿⣷⣶⣤⣿⣷[/#5FBAE6] [{tagline}] Putting AI in Anki. For free.  [/{tagline}]
+[#5FBAE6]⠀⠀⠀⠀⠘⠛⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠛⠛⠃[/#5FBAE6] [{subtitle}] Because making 200 flashcards[/{subtitle}]
+                      [{subtitle}] by hand is not high-yield.[/{subtitle}]
+[{S.muted}][/{S.muted}]
 """
 
 
 def show_banner():
-    banner_text = Text.from_markup(BANNER.strip())
+    banner = _BANNER_TEMPLATE.format(
+        tagline=S.banner_tagline,
+        subtitle=S.banner_subtitle,
+        S=S,
+    )
+    banner_text = Text.from_markup(banner.strip())
     panel = Align(Panel.fit(
         banner_text,
-        subtitle="[white][bold bright_cyan]N[/bold bright_cyan]adia's [bold bright_cyan]I[/bold bright_cyan]mage [bold bright_cyan]O[/bold bright_cyan]cclusion [bold bright_cyan]B[/bold bright_cyan]ooster [bold bright_cyan]I[/bold bright_cyan]s [bold bright_cyan]U[/bold bright_cyan]n[bold bright_cyan]M[/bold bright_cyan]anned[/white]",
+        subtitle="[bold bright_cyan]N[/bold bright_cyan]adia's [bold bright_cyan]I[/bold bright_cyan]mage [bold bright_cyan]O[/bold bright_cyan]cclusion [bold bright_cyan]B[/bold bright_cyan]ooster [bold bright_cyan]I[/bold bright_cyan]s [bold bright_cyan]U[/bold bright_cyan]n[bold bright_cyan]M[/bold bright_cyan]anned",
         border_style="sky_blue3",
         box=box.ROUNDED,
         padding=(0, 2),
-    ),align="center")
+    ), align="center")
     console.print(panel)
     console.print()
 
@@ -62,8 +91,8 @@ def main():
         from anki_niobium.cache import clear_all, stats, CACHE_DB
         s = stats()
         clear_all()
-        console.print(f"[green]Cache cleabright_cyan ({s['processed']} processed entries, {s['claude_cache']} Claude responses)[/green]")
-        console.print(f"[dim]{CACHE_DB}[/dim]")
+        console.print(f"[{S.success}]Cache cleared ({s['processed']} processed entries, {s['claude_cache']} Claude responses)[/{S.success}]")
+        console.print(f"[{S.muted}]{CACHE_DB}[/{S.muted}]")
         return
 
     ap = argparse.ArgumentParser(formatter_class=RichHelpFormatter)
@@ -127,8 +156,13 @@ def main():
         ap.error("--page requires -pin/--single-pdf")
     if args.get('generate') and not args.get('smart'):
         ap.error("--generate requires --smart")
+    # Default to all pages when --generate + -pin but no --page
     if args.get('generate') and args.get('single_pdf') and not args.get('page'):
-        ap.error("--generate with -pin requires --page (use --page to select which pages to process)")
+        import fitz
+        doc = fitz.Document(args['single_pdf'])
+        total = doc.page_count
+        doc.close()
+        args['page'] = f"1-{total}"
 
     # Resolve default output directory from work_dir when needed
     needs_default = (
@@ -143,7 +177,7 @@ def main():
             default_out = os.path.join(os.path.expanduser(work_dir_cfg), "outputs")
             os.makedirs(default_out, exist_ok=True)
             args['apkg_out'] = default_out
-            console.print(f"[cyan]Output: {default_out}[/cyan]")
+            console.print(f"[{S.accent}]Output: {default_out}[/{S.accent}]")
         else:
             ap.error("No output specified. Use -deck, -apkg PATH, or -pout PATH (or set work_dir in config).")
         # Pass resolved config path to avoid resolving twice

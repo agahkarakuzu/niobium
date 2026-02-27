@@ -7,6 +7,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from anki_niobium.cache import content_hash_bytes, get_cached_claude_response, set_cached_claude_response
+from anki_niobium.theme import S
 
 console = Console()
 
@@ -114,9 +115,9 @@ def _log_usage(response, model):
     _session_totals["calls"] += 1
 
     console.print(
-        f"[dim]  tokens: {input_tokens:,} in / {output_tokens:,} out "
+        f"[{S.muted}]  tokens: {input_tokens:,} in / {output_tokens:,} out "
         f"| cost: ${cost:.4f} "
-        f"| session: ${_session_totals['cost']:.4f} ({_session_totals['calls']} calls)[/dim]"
+        f"| session: ${_session_totals['cost']:.4f} ({_session_totals['calls']} calls)[/{S.muted}]"
     )
 
 
@@ -137,8 +138,8 @@ def smart_filter_results(results, image_bytes, config):
     # API key: config takes priority, then env var
     api_key = llm_config.get("api_key") or os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        console.print("[yellow]No API key found. Set ANTHROPIC_API_KEY or add api_key to llm config.[/yellow]")
-        console.print("[yellow]Falling back to rule-based filtering.[/yellow]")
+        console.print(f"[{S.accent2}]No API key found. Set ANTHROPIC_API_KEY or add api_key to llm config.[/{S.accent2}]")
+        console.print(f"[{S.accent2}]Falling back to rule-based filtering.[/{S.accent2}]")
         from anki_niobium.io import niobium
         return niobium.filter_results(results, config)
 
@@ -192,7 +193,7 @@ def smart_filter_results(results, image_bytes, config):
 
         try:
             client = _get_client(api_key)
-            console.print(f"[cyan]Sending image to Claude ({model}) for smart filtering...[/cyan]")
+            console.print(f"[{S.accent}]Sending image to Claude ({model}) for smart filtering...[/{S.accent}]")
             response = client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
@@ -221,8 +222,8 @@ def smart_filter_results(results, image_bytes, config):
             from_cache = False
 
         except Exception as e:
-            console.print(f"[bold red]Claude API error: {e}[/bold red]")
-            console.print("[yellow]Falling back to rule-based filtering.[/yellow]")
+            console.print(f"[{S.error}]Claude API error: {e}[/{S.error}]")
+            console.print(f"[{S.accent2}]Falling back to rule-based filtering.[/{S.accent2}]")
             from anki_niobium.io import niobium
             return niobium.filter_results(results, config)
 
@@ -237,7 +238,7 @@ def smart_filter_results(results, image_bytes, config):
     table = Table(show_header=True, header_style="bold", pad_edge=False, box=None)
     table.add_column("", width=2)
     table.add_column("Text", style="white", no_wrap=True, max_width=30)
-    table.add_column("Detail", style="dim")
+    table.add_column("Detail", style=S.muted)
 
     filtered_results = []
     hints_html = ""
@@ -248,7 +249,7 @@ def smart_filter_results(results, image_bytes, config):
             corrected = decision.get("corrected_text") if decision else None
             display_text = text
             if corrected and corrected != text:
-                display_text = f"{corrected} [dim](was: {text})[/dim]"
+                display_text = f"{corrected} [{S.muted}](was: {text})[/{S.muted}]"
                 text = corrected
                 corrections += 1
 
@@ -256,21 +257,21 @@ def smart_filter_results(results, image_bytes, config):
             hint = decision.get("hint", "") if decision else ""
             if hint:
                 hints_html += f"<b>{text}</b>: {hint}<br>"
-            table.add_row("[green]+[/green]", display_text, hint if hint else "[dim]-[/dim]")
+            table.add_row(f"[{S.success}]+[/{S.success}]", display_text, hint if hint else f"[{S.muted}]-[/{S.muted}]")
         else:
             reason = decision.get("reason", "")
-            table.add_row("[red]-[/red]", f"[dim]{text}[/dim]", f"[dim]{reason}[/dim]")
+            table.add_row(f"[{S.error}]-[/{S.error}]", f"[{S.muted}]{text}[/{S.muted}]", f"[{S.muted}]{reason}[/{S.muted}]")
 
     if hints_html:
         extra += hints_html
 
     kept = len(filtered_results)
     skipped = len(results) - kept
-    subtitle_parts = [f"[green]{kept} kept[/green]", f"[red]{skipped} skipped[/red]"]
+    subtitle_parts = [f"[{S.success}]{kept} kept[/{S.success}]", f"[{S.error}]{skipped} skipped[/{S.error}]"]
     if corrections:
-        subtitle_parts.append(f"[cyan]{corrections} OCR fixes[/cyan]")
+        subtitle_parts.append(f"[{S.accent}]{corrections} OCR fixes[/{S.accent}]")
     if from_cache:
-        subtitle_parts.append("[dim]cached[/dim]")
+        subtitle_parts.append(f"[{S.muted}]cached[/{S.muted}]")
     subtitle = " | ".join(subtitle_parts)
 
     renderables = []
@@ -280,9 +281,9 @@ def smart_filter_results(results, image_bytes, config):
 
     panel = Panel(
         Group(*renderables),
-        title=f"[bold]Smart Filter[/bold] [dim]({model})[/dim]",
+        title=f"[bold]Smart Filter[/bold] [{S.muted}]({model})[/{S.muted}]",
         subtitle=subtitle,
-        border_style="cyan",
+        border_style=S.accent,
         padding=(1, 1),
     )
     console.print(panel)
@@ -376,7 +377,7 @@ def smart_generate_cards(page_index, page_image_bytes, config, max_cards=None, c
 
     api_key = llm_config.get("api_key") or os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        console.print("[bold red]No API key found. --smart requires ANTHROPIC_API_KEY.[/bold red]")
+        console.print(f"[{S.error}]No API key found. --smart requires ANTHROPIC_API_KEY.[/{S.error}]")
         raise ValueError("API key required for smart generation")
 
     model = llm_config.get("model", "claude-sonnet-4-6")
@@ -473,7 +474,7 @@ def smart_generate_cards(page_index, page_image_bytes, config, max_cards=None, c
 
         try:
             client = _get_client(api_key)
-            console.print(f"[cyan]Sending page {display_page} ({mode_label}) to Claude ({model})...[/cyan]")
+            console.print(f"[{S.accent}]Sending page {display_page} ({mode_label}) to Claude ({model})...[/{S.accent}]")
             response = client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
@@ -501,7 +502,7 @@ def smart_generate_cards(page_index, page_image_bytes, config, max_cards=None, c
             from_cache = False
 
         except Exception as e:
-            console.print(f"[bold red]Claude API error for page {display_page}: {e}[/bold red]")
+            console.print(f"[{S.error}]Claude API error for page {display_page}: {e}[/{S.error}]")
             raise
 
     _display_generated_cards(data, display_page, model, from_cache)
@@ -511,7 +512,7 @@ def smart_generate_cards(page_index, page_image_bytes, config, max_cards=None, c
 def _display_generated_cards(data, display_page, model, from_cache):
     table = Table(show_header=True, header_style="bold", pad_edge=False, box=None)
     table.add_column("#", width=3)
-    table.add_column("Type", style="cyan", width=16)
+    table.add_column("Type", style=S.accent, width=16)
     table.add_column("Content", style="white", no_wrap=False)
 
     for i, card in enumerate(data.get("cards", []), 1):
@@ -527,9 +528,9 @@ def _display_generated_cards(data, display_page, model, from_cache):
             content = "unknown type"
         table.add_row(str(i), card_type, content)
 
-    subtitle_parts = [f"[green]{len(data.get('cards', []))} cards[/green]"]
+    subtitle_parts = [f"[{S.success}]{len(data.get('cards', []))} cards[/{S.success}]"]
     if from_cache:
-        subtitle_parts.append("[dim]cached[/dim]")
+        subtitle_parts.append(f"[{S.muted}]cached[/{S.muted}]")
     subtitle = " | ".join(subtitle_parts)
 
     renderables = []
@@ -540,9 +541,9 @@ def _display_generated_cards(data, display_page, model, from_cache):
 
     panel = Panel(
         Group(*renderables),
-        title=f"[bold]Smart Generate[/bold] — Page {display_page} [dim]({model})[/dim]",
+        title=f"[bold]Smart Generate[/bold] — Page {display_page} [{S.muted}]({model})[/{S.muted}]",
         subtitle=subtitle,
-        border_style="magenta",
+        border_style=S.accent2,
         padding=(1, 1),
     )
     console.print(panel)

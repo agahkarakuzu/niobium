@@ -1,3 +1,7 @@
+# ── Appearance ───────────────────────────────────────────────────────
+# Terminal color theme: "dark" (bright colors) or "light" (darker tones)
+theme: dark
+
 # ── Language & hardware ──────────────────────────────────────────────
 # Comma-separated EasyOCR language codes (e.g. "en", "en,fr")
 langs: en
