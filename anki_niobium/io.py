@@ -976,13 +976,13 @@ class niobium:
             occlusion = self.get_occlusion_coords(results, H, W)
 
             # Prepare image file for media
-            hashed_name = niobium.get_image_hash(image_name) + '.png'
+            hashed_name = niobium.get_image_hash(image_name) + '.webp'
             if image_name:
                 img = Image.open(image_name)
             else:
                 img = image_in
             tmp_path = os.path.join(tmp_media_dir, hashed_name)
-            img.save(tmp_path, format='PNG')
+            img.save(tmp_path, format='WEBP', quality=90)
             media_files.append(tmp_path)
 
             header = ''
@@ -1133,9 +1133,9 @@ class niobium:
             br = (int(br[0]), int(br[1]))
             bl = (int(bl[0]), int(bl[1]))
             draw.rectangle([tl, br], outline="red", width=2)
-        hashed_name = niobium.get_image_hash(image_name) + '.jpeg'
+        hashed_name = niobium.get_image_hash(image_name) + '.webp'
         image = image.convert('RGB')
-        image.save(os.path.join(path, hashed_name), quality=50)
+        image.save(os.path.join(path, hashed_name), format='WEBP', quality=50)
 
     @staticmethod
     def get_occlusion_coords(results, H, W):
@@ -1169,13 +1169,13 @@ class niobium:
     @staticmethod
     def add_image_occlusion_deck(image_name, occlusion, deck_name, extra, image_in,header=False):
         if image_name:
-            with open(image_name, "rb") as f:
-                image_data = f.read()
-                image_base64 = base64.b64encode(image_data).decode("utf-8")
+            img = Image.open(image_name)
+            image_data = niobium.byte_convert(img)
+            image_base64 = base64.b64encode(image_data).decode("utf-8")
         else:
             image_in = niobium.byte_convert(image_in)
             image_base64 = base64.b64encode(image_in).decode("utf-8")
-        hashed_name = "_" + niobium.get_image_hash(image_name) + '.jpeg'
+        hashed_name = "_" + niobium.get_image_hash(image_name) + '.webp'
         if header:
             fields =  {
                         "Occlusion": occlusion,
@@ -1519,8 +1519,10 @@ class niobium:
 
     @staticmethod
     def byte_convert(image_in):
+        if image_in.mode not in ('RGB', 'RGBA'):
+            image_in = image_in.convert('RGBA' if 'A' in image_in.mode else 'RGB')
         with BytesIO() as output:
-            image_in.save(output, format="PNG")
+            image_in.save(output, format="WEBP", quality=90)
             return output.getvalue()
 
     @staticmethod

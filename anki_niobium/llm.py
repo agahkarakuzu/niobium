@@ -181,7 +181,7 @@ def smart_filter_results(results, image_bytes, config):
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": "image/png",
+                    "media_type": "image/webp",
                     "data": image_b64,
                 },
             },
@@ -426,7 +426,7 @@ def smart_generate_cards(page_index, page_image_bytes, config, max_cards=None, c
                     "type": "image",
                     "source": {
                         "type": "base64",
-                        "media_type": "image/png",
+                        "media_type": "image/webp",
                         "data": image_b64,
                     },
                 },
@@ -449,7 +449,7 @@ def smart_generate_cards(page_index, page_image_bytes, config, max_cards=None, c
                     "type": "image",
                     "source": {
                         "type": "base64",
-                        "media_type": "image/png",
+                        "media_type": "image/webp",
                         "data": image_b64,
                     },
                 },
